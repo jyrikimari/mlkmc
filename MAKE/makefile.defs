@@ -1,0 +1,25 @@
+# Makefile common definitions
+# 
+# Copyright (C) 2024 Jyri Kimari
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+FLAGS=-cpp -fopenmp -O2 -g -fbounds-check
+LIB=-lFoX_sax -lFoX_wxml -lgap -lquip -llammps
+LIB_INCLUDE=-LQUIP/src/fox/wxml -LQUIP/src/fox/sax -Llammps/src
+INCLUDE=-IQUIP/src/fox/wxml -IQUIP/src/fox/sax -Ilammps/src
+OBJ=lammps.o mt19937-64.o constants.o geometry.o atoms_types.o utils.o atoms.o ml.o kmc.o
+TARGETS=mlkmc train_ml remove_duplicates convert_to_FANN_format refit_ml make_descriptor merge_predictors analyze_system
+
+.SECONDARY:

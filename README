@@ -1,0 +1,92 @@
+MLKMC - Machine learning augmented Kinetic Monte Carlo simulation tool
+
+Copyright (C) 2026 Jyri Kimari
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Steps to install:
+
+1. $ git clone --recursive git@gitlab.com:jyrilaht/mlkmc.git
+2. On desktop:
+   $ make
+
+   should be sufficient. The QUIP library will be built as
+   a part of compilation, and you will be prompted to make
+   choices in QUIP's make config. The default option should
+   work for everything EXCEPT
+   "Would you like to compile with GAP support ? [y/n]"
+   Here you should choose y instead of the default n.
+
+   The way LAMMPS is linked requires setting
+   $ export LD_LIBRARY_PATH=/path/to/mlkmc/lammps/src:$LD_LIBRARY_PATH
+   before running, both on desktop and on clusters.
+
+   On clusters, you will need to load the appropriate modules
+   and build the appropriate target. Support currently extends
+   to the CSC Puhti cluster, the NSC Tetralith cluster,
+   and the Helsinki University Turso cluster federation.
+
+   When QUIP's make config prompts you to choose
+   "Would you like to compile with preconditioned minimisation support? (not working with Intel compiler) [y/n]",
+   it is most likely wise to choose n if you are using Intel
+   compiler, as instructed here for Puhti and Tetralith.
+
+   On Puhti:
+   $ module load intel-oneapi-compilers intel-oneapi-mpi intel-oneapi-mkl
+   $ make puhti
+
+   On Tetralith:
+   $ module load buildenv-intel/2023a-eb
+   $ make tetralith
+
+   On Turso:
+   $ module load OpenMPI OpenBLAS LAPACK
+   $ make turso
+
+Running on desktop (mainly for testing/developing):
+
+   You need an mlkmc.in file in the working directory (example
+   provided), and a LAMMPS style interatomic potential energy
+   function in the place indicated in mlkmc.in. Then, if
+   the mlkmc directory have been added to your PATH, to run:
+   $ mpirun -n 11 --oversubscribe mlkmc
+
+   The number of MPI tasks, here 11, is equal to the default number
+   of NEB replicas in the barrier calculations. If you change
+   the parameter neb_images in mlkmc.in, change the number of
+   mpirun -n parameter accordingly. On a desktop, you most likely
+   need the --oversubscribe flag to have enough "cores" available.
+
+   On a desktop, you may want to direct stdout to a file, by e.g.
+   $ mpirun -n 11 --oversubscribe mlkmc | tee mlkmc.out
+
+Running on clusters:
+
+   In the sbatch script, set -N 1, --ntasks-per-node=11 and --cpus-per-task=1.
+   Then (again if mlkmc can be found in your PATH), include the following commands
+   in the script, depending on the platform.
+
+   On Puhti:
+   module load intel-oneapi-compilers intel-oneapi-mpi intel-oneapi-mkl
+   ulimit -Ss unlimited
+   srun mlkmc
+
+   On Tetralith:
+   module load buildenv-intel/2023a-eb
+   ulimit -Ss unlimited
+   srun mlkmc
+
+   On Turso:
+   module load OpenMPI OpenBLAS LAPACK
+   srun --mpi=pmix mlkmc

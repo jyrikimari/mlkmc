@@ -1,0 +1,9 @@
+[submodule "quip"]
+	path = quip
+	url = git@gitlab.com:jyrilaht/quip.git
+[submodule "lammps"]
+	path = lammps
+	url = git@github.com:lammps/lammps.git
+[submodule "QUIP"]
+	path = QUIP
+	url = git@github.com:jyrikimari/QUIP.git

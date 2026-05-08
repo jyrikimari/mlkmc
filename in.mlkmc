@@ -1,0 +1,72 @@
+# Input file for ML-KMC.
+#
+# Format:
+# key value
+# Lines starting with '#', as well as empty lines, are ignored.
+# Any number of non-printing characters should work as separators.
+
+# MANDATORY PARAMETERS
+# No default values are defined.
+pot_name          "CuAgAu.eam.fs" # Potential file name
+pot_style         "eam/fs"        # Potential style
+lattice_constant  4.0896          # Lattice constant in Å
+nZ                1               # Number of elements in the system
+Z                 47              # List of atomic numbers, e.g. 47 29
+substrate_species 47              # Substrate species
+T                 300.0           # System temperature in K
+attempt_frequency 1.25e12         # Arrhenius equation attempt frequency in Hz
+max_steps         100000          # Maximum steps in the simulation
+print_interval    10              # How often (every n steps) to print in terminal. Set to 0 for no printing
+lae_cutoff_nth    4               # Local atomic environment (LAE) cutoff in terms of neighbour shells (4 => allow 4th nearest neighbour jumps). Mutually exclusive with lae_cutoff_dist
+max_jump_nth      3               # Longest allowed jump in terms of neighbour shells (4 => allow 4th nearest neighbour jumps). Mutually exclusive with max_jump_dist
+
+# ALTERNATIVE END CONDITIONS
+max_time          1.0e-3          # Maximum KMC time in the simulation (seconds). Set to 0 or leave commented to only restrict by other conditions
+max_wall_time     60400           # Maximum wall time (seconds). Set to 0 or leave commented to only restrict by other conditions. Default 604000 (~one week)
+#max_height        16.0            # Maximum height of the system in Å. Leave commented to only restrict by other conditions.
+#min_height        14.5            # Minimum height of the system in Å. Leave commented to only restrict by other conditions.
+
+# ADDING ATOMS IN THE SYSTEM BEFORE STARTING KMC
+initial_atoms     random 10       # Place atoms randomly on the surface, equal to the integer argument
+#initial_atoms     hexagon 5       # Place a hexagon on the surface, with "atomic radius" equal to the integer argument
+#initial_atoms     hexagon_plus_adatom 5 # Place a hexagon on the surface, with "atomic radius" equal to the integer argument, and an additional adatom on top of it in the middle
+#initial_atoms     triangle 5 A    # Place a triangle on the surface, with "atomic radius" equal to the integer argument, terminated in A/B edges
+#initial_atoms     triangle_plus_adatom 5 A # Place a hexagon on the surface, with "atomic radius" equal to the integer argument, terminated in A/B edges, and an additional adatom on top of it in the middle
+#initial_atoms     single 10.0 12.0 15.0 # Place a single adatom on the surface, at an available lattice site closest to the given coordinates in Å
+
+# COMMON NON-MANDATORY PARAMETERS WITH DEFAULT VALUES
+# Default values should be sensible. Change any of these as necessary.
+verbosity         normal          # Verbosity; either silent, normal, loud or absurd. Default normal
+write_interval    1.0e-6          # How often (every x seconds) to do file I/O. Set to negative for no writing, set to 0.0 to write every frame. Default 0.0
+restart_file      kmc.restart     # Restart file, read from and (over)written into. Default kmc.restart
+xyz_out           out.xyz         # Output xyz file. Default out.xyz
+allow_exchange    T               # Allow exchange events. Default T(rue)
+xmax              27              # Maximum extent of the system in the x coordinate, in "{111} unit cells." Default 27
+ymax              47              # Maximum extent of the system in the y coordinate, in "{111} unit cells." Default 47
+zmax              4               # Maximum extent of the system in the z coordinate, in "{111} unit cells." Default 4
+substrate_layers  2               # Thickness of the substrate, in "{111} unit cells." Default 2
+substrate_type    regular         # Substrate type: regular = the same as the FIRST ELEMENT in the system; weak = duplicate of the FIRST ELEMENT with a separate entry in the pot_file. In the pot_file, give parameters for, e.g., Ag1 and Ag2. Default regular
+seed              12345           # Random number generator seed (unrelated to the one QUIP prints in the beginning). Default 12345
+n_data_min        100             # Minimum number of data points required before starting to use Gaussian process regression (GPR). Default 100.
+n_data_max        10000           # Maximum number of data points for GPR. Default 10000
+n_sparse_max      1000            # Maximum number of sparse data points for sparse GPR. Default 1000
+relax_iter        1000            # Maximum number of iteration steps in relaxation. Default 1000
+relax_tol         1.0e-7          # Energy tolerance in relaxation in eV. Default 1.0e-7
+neb_images        11              # Number of NEB images. Crucially should match the number of CPU cores. Default 11
+neb_steps         1000            # Maximum number of NEB steps. Default 1000
+neb_spring        1.0             # NEB spring constant. Default 1.0
+neb_error         0.1             # Intrinsic error of NEB barriers in eV. Default value 0.1
+ml_tol            0.5             # Error estimate tolerance for accepting machine learning barriers in eV. Default 0.5
+dep_rate          0.0             # Deposition rate in monolayers/second for all elements in the system. Default 0.0 for all
+debug             F               # Debug flag for additional information and checks. Default F(alse)
+track_MSD         F               # Flag for tracking the mean square displacement of the first-deposited atom. Default F(alse)
+
+# ADVANCED NON-MANDATORY PARAMETERS
+# Parameters for machine learning. You probably shouldn't touch these unless you know what you're doing.
+l_max             3               # Highest degree of SOAP spherical harmonic function. Default 3
+n_max             4               # Number of SOAP spherical harmonic functions. Default 4
+atomic_gaussian_width 1.0         # Width of the atomic Gaussian in SOAP. Default 1.0
+delta             20.0            # Signal variance for GPR. Default 20.0
+zeta              20.0            # Zeta exponent for GPR kernel. Default 20.0
+covariance_type   dot_product     # Covariance type for GPR. Default dot_product
+regularisation    0.01            # Regularisation for sparse GPR variance estimate. Default 0.01

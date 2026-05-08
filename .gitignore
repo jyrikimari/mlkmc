@@ -1,0 +1,14 @@
+*.xyz
+*.idx
+*.o
+*.mod
+*.xml
+*.swp
+mlkmc
+train_ml
+convert_to_FANN_format
+make_descriptor
+refit_ml
+remove_duplicates
+merge_predictors
+analyze_system
