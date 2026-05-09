@@ -56,15 +56,15 @@ Steps to install:
 
 Running on desktop (mainly for testing/developing):
 
-   You need an mlkmc.in file in the working directory (example
+   You need an in.mlkmc file in the working directory (example
    provided), and a LAMMPS style interatomic potential energy
-   function in the place indicated in mlkmc.in. Then, if
+   function in the place indicated in in.mlkmc. Then, if
    the mlkmc directory have been added to your PATH, to run:
    $ mpirun -n 11 --oversubscribe mlkmc
 
    The number of MPI tasks, here 11, is equal to the default number
    of NEB replicas in the barrier calculations. If you change
-   the parameter neb_images in mlkmc.in, change the number of
+   the parameter neb_images in in.mlkmc, change the number of
    mpirun -n parameter accordingly. On a desktop, you most likely
    need the --oversubscribe flag to have enough "cores" available.
 
