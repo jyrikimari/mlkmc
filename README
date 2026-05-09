@@ -17,7 +17,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 Steps to install:
 
-1. $ git clone --recursive git@gitlab.com:jyrilaht/mlkmc.git
+1. $ git clone --recursive git@github.com:jyrikimari/mlkmc.git
 2. On desktop:
    $ make
 
