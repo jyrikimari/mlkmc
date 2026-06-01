@@ -1,4 +1,4 @@
-MLKMC - Machine learning augmented Kinetic Monte Carlo simulation tool
+ML-KMC - Machine learning augmented Kinetic Monte Carlo simulation tool
 
 Copyright (C) 2026 Jyri Kimari
 
@@ -90,3 +90,8 @@ Running on clusters:
    On Turso:
    module load OpenMPI OpenBLAS LAPACK
    srun --mpi=pmix mlkmc
+
+Cite as:
+
+   Kimari, J., Djurabekova, F., & Sarakinos, K. (2026). A Self-Evolving Machine-Learning-Based
+   Kinetic Monte Carlo Method for Modelling Thin-Film Growth. https://doi.org/10.48550/arXiv.2605.31144
