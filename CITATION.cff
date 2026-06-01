@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+authors:
+- family-names: "Kimari"
+  given-names: "Jyri"
+  orcid: "0000-0002-4363-1326"
+- family-names: "Djurabekova"
+  given-names: "Flyura"
+  orcid: "0000-0002-5828-200X"
+- family-names: "Sarakinos"
+  given-names: "Kostas"
+  orcid: "0000-0003-2864-9509"
+title: "ML-KMC - Machine learning augmented Kinetic Monte Carlo simulation tool"
+date-released: 2026-05-08
+url: "https://github.com/jyrikimari/mlkmc"
+preferred-citation:
+  type: article
+  authors:
+  - family-names: "Kimari"
+    given-names: "Jyri"
+    orcid: "0000-0002-4363-1326"
+  - family-names: "Djurabekova"
+    given-names: "Flyura"
+    orcid: "0000-0002-5828-200X"
+  - family-names: "Sarakinos"
+    given-names: "Kostas"
+    orcid: "0000-0003-2864-9509"
+  doi: "10.48550/arXiv.2605.31144"
+  title: "A Self-Evolving Machine-Learning-Based Kinetic Monte Carlo Method for Modelling Thin-Film Growth"
+  year: 2026
