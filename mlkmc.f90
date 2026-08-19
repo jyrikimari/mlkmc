@@ -30,6 +30,7 @@ program mlkmc
   type(lammps) :: lmp
   integer :: relax_iter,neb_images,neb_steps,max_jump_nth,lae_cutoff_nth
   double precision :: relax_tol,ml_tol,neb_spring
+  integer :: crystal_orientation,crystal_structure
   real(kind=rk) :: lattice_constant
   integer :: nZ,n_soap_Z,n_soap_species
   integer,allocatable :: Z(:),Z_tmp(:),soap_Z(:),soap_species_Z(:)
@@ -58,7 +59,7 @@ program mlkmc
   integer :: print_interval
   character(len=80) :: xyz_out,pot_name,pot_style,predictor_file,restart_file
   character(len=80) :: zstring,depstring
-  logical :: exist,debug,restart_read,allow_exchange,periodic(3),track_MSD
+  logical :: exist,debug,restart_read,allow_exchange,periodic(3),hcp_flag,track_MSD
   integer :: i,error,internal_error,coord_jumping,coord_middle,coord_target,shell,ml_read,outfileunit
 
   integer :: first_id,last_id
@@ -198,11 +199,10 @@ program mlkmc
             error=internal_error
           endif
         else
-          call create_system(system,xmax,ymax,zmax,lattice_constant,substrate_layers,&
-                             substrate_species,substrate_type,max_jump_nth,lae_cutoff_nth,allow_exchange=allow_exchange,&
-                             periodic=periodic,initial_atoms=initial_atoms,initial_atoms_layers=initial_atoms_layers,&
-                             initial_atoms_termination=initial_atoms_termination,initial_atoms_coords=initial_atoms_coords,&
-                             error=internal_error)
+          call create_system(system,xmax,ymax,zmax,crystal_orientation,crystal_structure,lattice_constant,substrate_layers,&
+                             substrate_species,substrate_type,max_jump_nth,lae_cutoff_nth,initial_atoms,initial_atoms_layers,&
+                             initial_atoms_termination,initial_atoms_coords,allow_exchange=allow_exchange,&
+                             periodic=periodic,hcp_flag=hcp_flag,error=internal_error)
           if (internal_error/=0) then
             write(0,"(a)") "*** Error creating system"
             call print_system(system,"error.system")
@@ -290,12 +290,12 @@ program mlkmc
     if (restart_read) then
       kmc%system=system
     else
-      soap_cutoff=get_Xnn_dist(lattice_constant,lae_cutoff_nth,error=internal_error)
+      soap_cutoff=get_Xnn_dist(lattice_constant,crystal_structure,lae_cutoff_nth,error=internal_error)
       if (internal_error/=0) then
         write(0,"(a)") "*** Error setting LAE cutoff dist based on lae_cutoff_nth"
         error=internal_error
       endif
-      soap_cutoff=soap_cutoff+get_Xnn_dist(lattice_constant,max_jump_nth,error=internal_error)
+      soap_cutoff=soap_cutoff+get_Xnn_dist(lattice_constant,crystal_structure,max_jump_nth,error=internal_error)
       if (internal_error/=0) then
         write(0,"(a)") "*** Error setting max jump dist based on max_jump_nth"
         error=internal_error
@@ -317,9 +317,12 @@ program mlkmc
       endif
     endif
 
-    allocate(kmc%hop_predictor(3:LOCK_THRESHOLD,3:N_NN_MAX,kmc%system%max_jump_shell))
+    allocate(kmc%hop_predictor(N_NN_MIN(crystal_structure):LOCK_THRESHOLD(crystal_structure),&
+                               N_NN_MIN(crystal_structure):N_NN_MAX(crystal_structure),kmc%system%max_jump_shell))
     if (allow_exchange) then
-      allocate(kmc%exchange_predictor(3:N_NN_MAX-1,3:LOCK_THRESHOLD,3:N_NN_MAX))
+      allocate(kmc%exchange_predictor(N_NN_MIN(crystal_structure):N_NN_MAX(crystal_structure)-1,&
+                                      N_NN_MIN(crystal_structure):LOCK_THRESHOLD(&
+                                      crystal_structure),N_NN_MIN(crystal_structure):N_NN_MAX(crystal_structure)))
     endif
 
     write(6,"(a)",advance="no") "# Reading predictors..."
@@ -342,9 +345,9 @@ program mlkmc
     if (error==0) then
       ml_read=0
       do shell=1,kmc%system%max_jump_shell
-        do coord_target=3,N_NN_MAX
-          do coord_jumping=3,LOCK_THRESHOLD
-            if (coord_jumping<N_NN_MAX) then
+        do coord_target=N_NN_MIN(crystal_structure),N_NN_MAX(crystal_structure)
+          do coord_jumping=N_NN_MIN(crystal_structure),LOCK_THRESHOLD(crystal_structure)
+            if (coord_jumping<N_NN_MAX(crystal_structure)) then
               predictor_file="predictors/hop_predictor_"//coord_jumping//"_"//coord_target//"_"//shell//".xml"
               inquire(file=predictor_file,exist=exist)
               if (exist) then
@@ -354,7 +357,7 @@ program mlkmc
             endif
             if (allow_exchange) then
               if (shell==1) then
-                do coord_middle=3,N_NN_MAX-1
+                do coord_middle=N_NN_MIN(crystal_structure),N_NN_MAX(crystal_structure)-1
                   predictor_file="predictors/exchange_predictor_"//coord_middle//"_"//coord_jumping//"_"//coord_target//".xml"
                   inquire(file=predictor_file,exist=exist)
                   if (exist) then
@@ -500,11 +503,14 @@ contains
     debug=.false.
     track_MSD=.false.
     allow_exchange=.true.
+    hcp_flag=.false.
 
     ! Initial values for checking duplicates
     pot_name=""
     pot_style=""
     lattice_constant=-1.0d0
+    crystal_orientation=ORIENTATION_UNDEFINED
+    crystal_structure=CRYSTAL_STRUCTURE_UNDEFINED
     substrate_species=-1
     nZ=-1
     temp=-1.0d0
@@ -894,6 +900,51 @@ contains
             write(0,"(a,i0)") "*** Error: lattice_constant>0.0 can't be "//trim(arg)//" on line ",i
             stop
           endif
+        case("orientation")
+          if (crystal_orientation/=ORIENTATION_UNDEFINED) then
+            write(0,"(a,i0)") "*** Error: duplicate parameter orientation on line ",i
+            stop
+          endif
+          select case(arg)
+            case("111")
+              crystal_orientation=ORIENTATION_111
+            case("110")
+              crystal_orientation=ORIENTATION_110
+            case("100")
+              crystal_orientation=ORIENTATION_100
+            case("0001")
+              if (crystal_structure==CRYSTAL_STRUCTURE_BCC &
+                  .or. (crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED .and. .not. hcp_flag)) then
+                write(0,"(a)") "*** Error: (0001) orientation only makes sense for hcp"
+                stop
+              endif
+              crystal_orientation=ORIENTATION_111 ! stands in for hcp (0001) as well
+            case default
+              write(0,"(a,i0)") "*** Error: unknown orientation "//trim(arg)//" on line ",i
+              stop
+          end select
+        case("crystal")
+          if (crystal_structure/=CRYSTAL_STRUCTURE_UNDEFINED) then
+            write(0,"(a,i0)") "*** Error: duplicate parameter crystal on line ",i
+            stop
+          endif
+          select case(arg)
+            case("fcc")
+              crystal_structure=CRYSTAL_STRUCTURE_CLOSE_PACKED
+            case("bcc")
+              crystal_structure=CRYSTAL_STRUCTURE_BCC
+            case("hcp")
+              if (crystal_orientation==ORIENTATION_100 .or. crystal_orientation==ORIENTATION_110) then ! 111 stands in for hcp 0001 also
+                write(0,"(a)") "*** Error: only (0001) orientation currently implemented with hcp"
+                stop
+              else
+                crystal_structure=CRYSTAL_STRUCTURE_CLOSE_PACKED
+                hcp_flag=.true.
+              endif
+            case default
+              write(0,"(a,i0)") "*** Error: unknown crystal "//trim(arg)//" on line ",i
+              stop
+          end select
         case("nZ")
           if (nZ>0) then
             write(0,"(a,i0)") "*** Error: duplicate parameter nZ on line ",i
@@ -1140,6 +1191,14 @@ contains
       write(0,"(a)") "*** Error: didn't find mandatory parameter pot_style in input file."
       stop
     endif
+    if (crystal_structure==CRYSTAL_STRUCTURE_UNDEFINED) then
+      write(0,"(a)") "*** Error: didn't find mandatory parameter crystal in input file."
+      stop
+    endif
+    if (crystal_orientation==ORIENTATION_UNDEFINED) then
+      write(0,"(a)") "*** Error: didn't find mandatory parameter orientation in input file."
+      stop
+    endif
     if (lattice_constant<=0.0d0) then
       write(0,"(a)") "*** Error: didn't find mandatory parameter lattice_constant in input file."
       stop
@@ -1184,6 +1243,8 @@ contains
     write(6,"(a)") "# Starting program with these parameters:"
     write(6,"(a)") "# pot_name """//trim(pot_name)//""""
     write(6,"(a)") "# pot_style """//trim(pot_style)//""""
+    write(6,"(a,f10.6)") "# crystal "//trim(print_crystal_structure(crystal_structure,hcp_flag))
+    write(6,"(a,f10.6)") "# orientation "//trim(print_orientation(crystal_orientation,hcp_flag))
     write(6,"(a,f10.6)") "# lattice_constant ",lattice_constant
     write(6,"(a,i0)") "# xmax ",xmax
     write(6,"(a,i0)") "# ymax ",ymax
@@ -1327,5 +1388,51 @@ contains
         write(0,"(a)") "*** Unimplemented substrate_type in print_substrate_type()"
     end select
   end function print_substrate_type
+
+  function print_crystal_structure(crystal_structure,hcp_flag) result(crystal_structure_str)
+    integer,intent(in) :: crystal_structure
+    logical,intent(in) :: hcp_flag
+    character(len=80) :: crystal_structure_str
+
+    select case(crystal_structure)
+      case(CRYSTAL_STRUCTURE_UNDEFINED)
+        crystal_structure_str="undefined"
+      case(CRYSTAL_STRUCTURE_CLOSE_PACKED)
+        if (hcp_flag) then
+          crystal_structure_str="hcp"
+        else
+          crystal_structure_str="fcc"
+        endif
+      case(CRYSTAL_STRUCTURE_BCC)
+        crystal_structure_str="bcc"
+      case default
+        crystal_structure_str=""
+        write(0,"(a)") "*** Unimplemented crystal structure in print_crystal_structure()"
+    end select
+  end function print_crystal_structure
+
+  function print_orientation(crystal_orientation,hcp_flag) result(crystal_orientation_str)
+    integer,intent(in) :: crystal_orientation
+    logical,intent(in) :: hcp_flag
+    character(len=80) :: crystal_orientation_str
+
+    select case(crystal_orientation)
+      case(ORIENTATION_UNDEFINED)
+        crystal_orientation_str="undefined"
+      case(ORIENTATION_111)
+        if (hcp_flag) then
+          crystal_orientation_str="0001"
+        else
+          crystal_orientation_str="111"
+        endif
+      case(ORIENTATION_110)
+        crystal_orientation_str="110"
+      case(ORIENTATION_100)
+        crystal_orientation_str="100"
+      case default
+        crystal_orientation_str=""
+        write(0,"(a)") "*** Unimplemented crystal orientation in print_orientation()"
+    end select
+  end function print_orientation
 
 end program mlkmc

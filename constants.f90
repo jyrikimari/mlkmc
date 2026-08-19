@@ -84,44 +84,149 @@ module constants_module
   integer,parameter :: MINIM_RESULT_SUCCESS=1
   integer,parameter :: MINIM_RESULT_FAIL=2
 
+  integer,parameter :: ORIENTATION_UNDEFINED=0
+  integer,parameter :: ORIENTATION_111=1
+  integer,parameter :: ORIENTATION_110=2
+  integer,parameter :: ORIENTATION_100=3
+
+  integer,parameter :: CRYSTAL_STRUCTURE_UNDEFINED=0
+  integer,parameter :: CRYSTAL_STRUCTURE_CLOSE_PACKED=1 ! fcc any orientation or hcp (0001)
+  integer,parameter :: CRYSTAL_STRUCTURE_BCC=2
+
   real(kind=rk),parameter :: RATE_LOWERING_FACTOR=0.5_rk
 
-  real(kind=rk),parameter,dimension(3) :: UNIT_CELL=[sqrt(6.0_rk)/2.0_rk,&
-                                                     1.0_rk/sqrt(2.0_rk),&
-                                                     3.0_rk/sqrt(3.0_rk)]
+  ! Unit cells for different orientations and crystal structures
+  real(kind=rk),parameter,dimension(3,3,2) :: UNIT_CELL=reshape([sqrt(6.0_rk)/2.0_rk,& ! fcc {111} or hcp (0001)
+                                                                 1.0_rk/sqrt(2.0_rk),&
+                                                                 3.0_rk/sqrt(3.0_rk),&
+                                                                 1.0_rk,& ! fcc {110}
+                                                                 1.0_rk/sqrt(2.0_rk),&
+                                                                 1.0_rk/sqrt(2.0_rk),&
+                                                                 1.0_rk,& ! fcc {100}
+                                                                 1.0_rk,&
+                                                                 1.0_rk,&
+                                                                 sqrt(6.0_rk),& ! bcc {111}
+                                                                 sqrt(2.0_rk),&
+                                                                 sqrt(3.0_rk),&
+                                                                 sqrt(2.0_rk),& ! bcc {110}
+                                                                 1.0_rk,&
+                                                                 sqrt(2.0_rk),&
+                                                                 1.0_rk,& !bcc {100}
+                                                                 1.0_rk,&
+                                                                 1.0_rk],shape(UNIT_CELL))
 
-  integer :: N_NN_MAX=12
-  integer :: LOCK_THRESHOLD=9
 
-  real(kind=rk),parameter,dimension(6) :: NEIGH_DIST_FACT=[1.0_rk/sqrt(2.0_rk),1.0_rk,      sqrt(1.5_rk),&
-                                                           sqrt(2.0_rk),       sqrt(2.5_rk),sqrt(3.0_rk)]
+  integer,dimension(2) :: N_NN_MAX=[12,8]
+  integer,dimension(2) :: N_NN_MIN=[3,2]
+  integer,dimension(2) :: LOCK_THRESHOLD=[9,6]
+
+  real(kind=rk),parameter,dimension(6,2) :: NEIGH_DIST_FACT=reshape([1.0_rk/sqrt(2.0_rk), 1.0_rk,      sqrt(1.5_rk),& ! fcc/hcp
+                                                                sqrt(2.0_rk),        sqrt(2.5_rk),sqrt(3.0_rk),&
+                                                                0.5_rk*sqrt(3.0_rk), 1.0_rk,      sqrt(2.0_rk),& ! bcc
+                                                                0.5_rk*sqrt(11.0_rk),sqrt(3.0_rk),2.0_rk],shape(NEIGH_DIST_FACT))
 
   integer,parameter :: NN_SHELLS=16
-  real(kind=rk),parameter :: JUMP_DIST2_INDEX(NN_SHELLS)=[ 1.5_rk, 3.0_rk, 6.0_rk, 9.0_rk,10.5_rk,12.0_rk,&
-                                                          15.0_rk,18.0_rk,19.5_rk,21.0_rk,&
-                                                          22.5_rk,24.0_rk,25.5_rk,27.0_rk,31.5_rk,36.0_rk]/18.0_rk
+  real(kind=rk),parameter,dimension(2) :: JUMP_DIST2_INDEX(NN_SHELLS,2)=reshape([ 1.5_rk, 3.0_rk, 6.0_rk, 9.0_rk,10.5_rk,& ! fcc/hcp
+                                                                                 12.0_rk,15.0_rk,18.0_rk,19.5_rk,21.0_rk,&
+                                                                                 22.5_rk,24.0_rk,25.5_rk,27.0_rk,31.5_rk,36.0_rk,&
+                                                                                 13.5_rk,18.0_rk,36.0_rk,49.5_rk,54.0_rk,& ! bcc
+                                                                                 72.0_rk,& ! Unused from here on for bcc
+                                                                                         72.0_rk,72.0_rk,72.0_rk,72.0_rk,&
+                                                                                 72.0_rk,72.0_rk,72.0_rk,72.0_rk,72.0_rk,72.0_rk&
+                                                                                 ]/18.0_rk,shape(JUMP_DIST2_INDEX))
 
-  integer,parameter :: TRUE_1NN_SHELL=4
-  integer,parameter :: TRUE_2NN_SHELL=8
-  integer,parameter :: CLOSE_NEIGH_SHELL=12
-  integer,parameter :: TRUE_3NN_SHELL=14
-  integer,parameter :: TRUE_4NN_SHELL=NN_SHELLS
+  integer,parameter,dimension(2) :: TRUE_1NN_SHELL=[4,1]
+  integer,parameter,dimension(2) :: TRUE_2NN_SHELL=[8,2]
+  integer,parameter,dimension(2) :: CLOSE_NEIGH_SHELL=[12,3]
+  integer,parameter,dimension(2) :: TRUE_3NN_SHELL=[14,3]
+  integer,parameter,dimension(2) :: TRUE_4NN_SHELL=[NN_SHELLS,4]
 
-  integer,parameter :: JUMP_SHELLS(6)=[2,4,6,8,10,14]
-  integer,parameter :: N_JUMP_SHELLS=size(JUMP_SHELLS)
-  integer,parameter :: TRUE_1NN_JUMP_SHELL=2
-  integer,parameter :: TRUE_2NN_JUMP_SHELL=4
-  integer,parameter :: TRUE_3NN_JUMP_SHELL=6
-  integer,parameter :: NN_SHELL_TO_JUMP_SHELL(NN_SHELLS)=[0,1,0,2,0,3,0,4,0,&
-                                                          5,0,0,0,6,0,0]
+  integer,parameter :: N_JUMP_SHELLS=6
+  integer,parameter,dimension(N_JUMP_SHELLS,2) :: JUMP_SHELLS=reshape([2,4,6,8,10,14,&
+                                                                       1,2,3,4, 5, 6],shape(JUMP_SHELLS))
+  integer,parameter,dimension(2) :: TRUE_1NN_JUMP_SHELL=[2,1]
+  integer,parameter,dimension(2) :: TRUE_2NN_JUMP_SHELL=[4,2]
+  integer,parameter,dimension(2) :: TRUE_3NN_JUMP_SHELL=[6,3]
+  integer,parameter,dimension(2) :: TRUE_4NN_JUMP_SHELL=[-1,4]
+  integer,parameter,dimension(NN_SHELLS,2) :: NN_SHELL_TO_JUMP_SHELL=reshape([0,1,0,2,0,3,0,4,0,& ! fcc/hcp
+                                                                              5,0,0,0,6,0,0,&
+                                                                              1,2,3,4,5,6,0,0,0,& ! bcc
+                                                                              0,0,0,0,0,0,0],shape(NN_SHELL_TO_JUMP_SHELL))
 
-  real(kind=rk),parameter,dimension(3,6) :: P_BASE=reshape([0.0_rk,          0.0_rk,                      0.0_rk,&
-                                                  sqrt(6.0_rk)/4.0_rk,       1.0_rk/(2.0_rk*sqrt(2.0_rk)),0.0_rk,&
-                                                  2.0_rk/3.0_rk*sqrt(1.5_rk),0.0_rk,                      1.0_rk/sqrt(3.0_rk),&
-                                                  1.0_rk/6.0_rk*sqrt(1.5_rk),1.0_rk/(2.0_rk*sqrt(2.0_rk)),1.0_rk/sqrt(3.0_rk),&
-                                                  sqrt(6.0_rk)/6.0_rk,       0.0_rk,                      2.0_rk/sqrt(3.0_rk),&
-                                                  5.0_rk/6.0_rk*sqrt(1.5_rk),1.0_rk/(2.0_rk*sqrt(2.0_rk)),2.0_rk/sqrt(3.0_rk)],&
-                                                  shape(P_BASE))
+  integer,parameter,dimension(3,2) :: P_MAX=reshape([6,2,4,12,4,2],shape(P_MAX))
+  integer,parameter,dimension(3,2) :: ATOMS_IN_LAYER=reshape([2,1,2,2,2,1],shape(ATOMS_IN_LAYER))
+  real(kind=rk),parameter,dimension(3,12,3,2) :: P_BASE=reshape([0.0_rk,           0.0_rk,                      0.0_rk,& ! fcc {111}
+                                             sqrt(6.0_rk)/4.0_rk,       1.0_rk/(2.0_rk*sqrt(2.0_rk)),0.0_rk,&
+                                             2.0_rk/3.0_rk*sqrt(1.5_rk),0.0_rk,                      1.0_rk/sqrt(3.0_rk),&
+                                             1.0_rk/6.0_rk*sqrt(1.5_rk),1.0_rk/(2.0_rk*sqrt(2.0_rk)),1.0_rk/sqrt(3.0_rk),&
+                                             sqrt(6.0_rk)/6.0_rk,       0.0_rk,                      2.0_rk/sqrt(3.0_rk),&
+                                             5.0_rk/6.0_rk*sqrt(1.5_rk),1.0_rk/(2.0_rk*sqrt(2.0_rk)),2.0_rk/sqrt(3.0_rk),& ! Unused from here on
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,& ! fcc {110}
+                                             0.5_rk,                    0.5_rk/sqrt(2.0_rk),         0.5_rk/sqrt(2.0_rk),& ! Unused from here on
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,& ! fcc {100}
+                                             0.5_rk,                    0.5_rk,                      0.0_rk,&
+                                             0.5_rk,                    0.0_rk,                      0.5_rk,&
+                                             0.0_rk,                    0.5_rk,                      0.5_rk,& ! Unused from here on for fcc {100}
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,& ! bcc {111}
+                                             1.0_rk/2.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  0.0_rk,&
+                                             1.0_rk/3.0_rk*sqrt(6.0_rk),0.0_rk,                      1.0_rk/6.0_rk*sqrt(3.0_rk),&
+                                             5.0_rk/6.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  1.0_rk/6.0_rk*sqrt(3.0_rk),&
+                                             2.0_rk/3.0_rk*sqrt(6.0_rk),0.0_rk,                      1.0_rk/3.0_rk*sqrt(3.0_rk),&
+                                             1.0_rk/6.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  1.0_rk/3.0_rk*sqrt(3.0_rk),&
+                                             0.0_rk,                    0.0_rk,                      1.0_rk/2.0_rk*sqrt(3.0_rk),&
+                                             1.0_rk/2.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  1.0_rk/2.0_rk*sqrt(3.0_rk),&
+                                             1.0_rk/3.0_rk*sqrt(6.0_rk),0.0_rk,                      2.0_rk/3.0_rk*sqrt(3.0_rk),&
+                                             5.0_rk/6.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  2.0_rk/3.0_rk*sqrt(3.0_rk),&
+                                             2.0_rk/3.0_rk*sqrt(6.0_rk),0.0_rk,                      5.0_rk/6.0_rk*sqrt(3.0_rk),&
+                                             1.0_rk/6.0_rk*sqrt(6.0_rk),1.0_rk/2.0_rk*sqrt(2.0_rk),  5.0_rk/6.0_rk*sqrt(3.0_rk),&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,& ! bcc {110}
+                                             sqrt(2.0_rk)/2.0_rk,       0.5_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.5_rk,                      sqrt(2.0_rk)/2.0_rk,&
+                                             sqrt(2.0_rk)/2.0_rk,       0.0_rk,                      sqrt(2.0_rk)/2.0_rk,& ! Unused from here on
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,& ! bcc {100}
+                                             0.5_rk,                    0.5_rk,                      0.5_rk,& ! Unused from here on
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk,&
+                                             0.0_rk,                    0.0_rk,                      0.0_rk],shape(P_BASE))
 
   double precision,parameter :: DUPLICATE_TOL=1.0d-10
   real(kind=rk),parameter :: DIST2_TOL=1.0e-5_rk

@@ -203,7 +203,7 @@ contains
         if (event_type==EVENT_TYPE_HOP) then
           nn_atom=a
           shell=b
-          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,kmc%system%crystal_structure)
           if (jump_shell<=0) then
             write(0,"(a,i0,a)") "*** Error: invalid shell ",shell," doesn't map to an allowed jump_shell in run_kmc()"
             internal_error=1
@@ -235,10 +235,12 @@ contains
             internal_error=1
           endif
           if (internal_error==0) then
-            where(.not. kmc%system%sites(1:kmc%system%n_sites)%initial_site .and. &
-                (kmc%system%sites(1:kmc%system%n_sites)%Z<0 .or. kmc%system%sites(1:kmc%system%n_sites)%n_near>1))
-              kmc%system%sites(1:kmc%system%n_sites)%inactive_counter=kmc%system%sites(1:kmc%system%n_sites)%inactive_counter+1
-            end where
+            if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              where(.not. kmc%system%sites(1:kmc%system%n_sites)%initial_site .and. &
+                  (kmc%system%sites(1:kmc%system%n_sites)%Z<0 .or. kmc%system%sites(1:kmc%system%n_sites)%n_near>1))
+                kmc%system%sites(1:kmc%system%n_sites)%inactive_counter=kmc%system%sites(1:kmc%system%n_sites)%inactive_counter+1
+              end where
+            endif
           endif
         else
           if (event_type==EVENT_TYPE_HOP) then
@@ -262,20 +264,23 @@ contains
         exit
       endif
       if (myrank==0) then
-        if (mod(step,INACTIVE_DELETION_INTERVAL)==0) then
-          n_deleted=delete_inactive_sites(kmc%system,error=internal_error)
-          if (internal_error==0) then
-            if (kmc%verbosity>VERBOSITY_NORMAL) then
-              write(6,"(a,i0,a,i0)") "# Deleted ",n_deleted," inactive sites at step ",step
-            endif
-            if (kmc%debug) then
-              call check_validity(kmc%system,verbosity=kmc%verbosity,error=internal_error)
-              if (internal_error/=0) then
-                write(0,"(a,i0,a,i0,a)") "*** ",internal_error," errors detected in check_validity() at step ",step," in run_kmc()"
+        if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+          if (mod(step,INACTIVE_DELETION_INTERVAL)==0) then
+            n_deleted=delete_inactive_sites(kmc%system,error=internal_error)
+            if (internal_error==0) then
+              if (kmc%verbosity>VERBOSITY_NORMAL) then
+                write(6,"(a,i0,a,i0)") "# Deleted ",n_deleted," inactive sites at step ",step
               endif
+              if (kmc%debug) then
+                call check_validity(kmc%system,verbosity=kmc%verbosity,error=internal_error)
+                if (internal_error/=0) then
+                  write(0,"(a,i0,a,i0,a)") "*** ",internal_error,&
+                                           " errors detected in check_validity() at step ",step," in run_kmc()"
+                endif
+              endif
+            else
+              write(0,"(a,i0,a)") "*** Error deleting inactive sites at step ",step," in run_kmc()"
             endif
-          else
-            write(0,"(a,i0,a)") "*** Error deleting inactive sites at step ",step," in run_kmc()"
           endif
         endif
         if (internal_error==0) then
@@ -528,6 +533,7 @@ contains
     integer :: n_near_final,nn_final,nn_initial,nn_mid
     integer :: only_substrate_jump
     integer :: max_jump_shell,max_nn,max_1nn,nn_id,nn_nn_id
+    integer :: crystal_structure
     integer :: n_neighbour_sites(NN_SHELLS),fingerprint(kmc%nZ,0:NN_SHELLS),minim_result
     integer,allocatable :: nn_tmp(:)
     integer,allocatable :: n_near_tmp(:)
@@ -567,11 +573,14 @@ contains
 
       initial_config=get_atoms(kmc%system)
 
+      crystal_structure=kmc%system%crystal_structure
+
       max_nn=kmc%system%max_nn
       max_1nn=kmc%system%max_1nn
       max_jump_shell=kmc%system%max_jump_shell
       allow_exchange=kmc%system%allow_exchange
     endif
+    call mpi_bcast(crystal_structure,1,MPI_INTEGER,0,MPI_COMM_WORLD,mpi_error)
     call mpi_bcast(max_nn,1,MPI_INTEGER,0,MPI_COMM_WORLD,mpi_error)
     call mpi_bcast(max_1nn,1,MPI_INTEGER,0,MPI_COMM_WORLD,mpi_error)
     call mpi_bcast(max_jump_shell,1,MPI_INTEGER,0,MPI_COMM_WORLD,mpi_error)
@@ -616,11 +625,15 @@ contains
         endif
         if (allow_exchange) then
           exchange_event_states=EVENT_FORBIDDEN
-          exchange_event_states(1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=&
+          exchange_event_states(1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                                crystal_structure))%n_neighbour_sites,&
+                                1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                                crystal_structure))%n_neighbour_sites)=&
             kmc%system%sites(site_id)%exchange_states(&
-              1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-              1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)
+              1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              crystal_structure))%n_neighbour_sites,&
+              1:kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              crystal_structure))%n_neighbour_sites)
         endif
         n_neighbour_sites=kmc%system%sites(site_id)%neighbour_shells(:)%n_neighbour_sites
       endif
@@ -634,14 +647,16 @@ contains
       if (myrank==0) then
         nn_tmp=kmc%system%sites(1:kmc%system%n_sites)%nn
         n_near_tmp=kmc%system%sites(1:kmc%system%n_sites)%n_near
-        do shell=1,TRUE_1NN_SHELL-1
+        do shell=1,TRUE_1NN_SHELL(crystal_structure)-1
           do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
             nn_id=kmc%system%sites(site_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
             n_near_tmp(nn_id)=n_near_tmp(nn_id)-1
           end do
         end do
-        do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-          nn_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)
+        do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                                                                crystal_structure))%n_neighbour_sites
+          nn_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                  crystal_structure))%neighbour_sites(nn_atom)
           nn_tmp(nn_id)=nn_tmp(nn_id)-1
         end do
       endif
@@ -655,7 +670,7 @@ contains
       ! Hop events of site site_id
       if (.not. locked) then
         do jump_shell=1,max_jump_shell
-          shell=JUMP_SHELLS(jump_shell)
+          shell=JUMP_SHELLS(jump_shell,crystal_structure)
           do nn_atom=1,n_neighbour_sites(shell)
             obstructed=.false.
             if (myrank==0) then
@@ -666,8 +681,10 @@ contains
               endif
               if (site_blocked(final_id)) then
                 obstructed=.true.
-                do nn_nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(1))%n_neighbour_sites
-                  nn_nn_id=kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(1))%neighbour_sites(nn_nn_atom)
+                do nn_nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(&
+                                1,crystal_structure))%n_neighbour_sites
+                  nn_nn_id=kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(&
+                             1,crystal_structure))%neighbour_sites(nn_nn_atom)
                   if (kmc%system%sites(nn_nn_id)%Z==0) then
                     site_blocked(nn_nn_id)=.true.
                   endif
@@ -714,7 +731,7 @@ contains
                   n_near_final=n_near_tmp(final_id)
                   nn_final=nn_tmp(final_id)
                   nn_initial=kmc%system%sites(site_id)%nn
-                  if (nn_final<3 .or. &
+                  if (nn_final<N_NN_MIN(crystal_structure) .or. &
                       n_near_final>0) then
                     obstructed=.true.
                   endif
@@ -757,10 +774,15 @@ contains
             if (.not. obstructed) then
               if (hop_event_states(nn_atom,jump_shell)==EVENT_LAE_CHANGED) then
                 if (myrank==0) then
-                  t1=mpi_wtime()
-                  call only_substrate_lae(kmc,site_id,final_id,only_substrate_jump,error=internal_error)
-                  t2=mpi_wtime()
-                  kmc%lae_sub_time=kmc%lae_sub_time+t2-t1
+                  only_substrate_jump=SUBSTRATE_NOT
+                  if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+                    if (kmc%system%orientation==ORIENTATION_111) then
+                      t1=mpi_wtime()
+                      call only_substrate_lae(kmc,site_id,final_id,only_substrate_jump,error=internal_error)
+                      t2=mpi_wtime()
+                      kmc%lae_sub_time=kmc%lae_sub_time+t2-t1
+                    endif
+                  endif
                   if (internal_error/=0) then
                     write(0,"(a)") "*** Error determining only-substrate lae case in get_rates()"
                   else
@@ -890,8 +912,10 @@ contains
                   endif
                 endif
               else
-                do nn_nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(1))%n_neighbour_sites
-                  nn_id=kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(1))%neighbour_sites(nn_nn_atom)
+                do nn_nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(&
+                                1,crystal_structure))%n_neighbour_sites
+                  nn_id=kmc%system%sites(final_id)%neighbour_shells(JUMP_SHELLS(&
+                          1,crystal_structure))%neighbour_sites(nn_nn_atom)
                   if (kmc%system%sites(nn_id)%Z==0) then
                     site_blocked(nn_id)=.true.
                   endif
@@ -967,11 +991,12 @@ contains
       endif
 
       ! Exchange events
-      do initial_site=1,n_neighbour_sites(TRUE_1NN_SHELL)
+      do initial_site=1,n_neighbour_sites(TRUE_1NN_SHELL(crystal_structure))
         obstructed=.false.
         if (myrank==0) then
           t1=mpi_wtime()
-          initial_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(initial_site)
+          initial_id=kmc%system%sites(site_id)%neighbour_shells(&
+                       TRUE_1NN_SHELL(crystal_structure))%neighbour_sites(initial_site)
           if (kmc%system%sites(initial_id)%substrate) then
             obstructed=.true.
           elseif (kmc%system%sites(initial_id)%Z<=0) then
@@ -982,15 +1007,18 @@ contains
           if (.not. obstructed) then
             nn_tmp=kmc%system%sites(1:kmc%system%n_sites)%nn
             n_near_tmp=kmc%system%sites(1:kmc%system%n_sites)%n_near
-            do shell=1,TRUE_1NN_SHELL-1
+            do shell=1,TRUE_1NN_SHELL(crystal_structure)-1
               do nn_atom=1,kmc%system%sites(initial_id)%neighbour_shells(shell)%n_neighbour_sites
               n_near_tmp(kmc%system%sites(initial_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)) &
                          =n_near_tmp(kmc%system%sites(initial_id)%neighbour_shells(shell)%neighbour_sites(nn_atom))-1
               end do
             end do
-            do nn_atom=1,kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-              nn_tmp(kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)) &
-                     =nn_tmp(kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom))-1
+            do nn_atom=1,kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                         crystal_structure))%n_neighbour_sites
+              nn_tmp(kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                     crystal_structure))%neighbour_sites(nn_atom)) &
+                     =nn_tmp(kmc%system%sites(initial_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                        crystal_structure))%neighbour_sites(nn_atom))-1
             end do
           endif
         endif
@@ -1019,7 +1047,7 @@ contains
           endif
           cycle
         endif
-        do final_site=1,n_neighbour_sites(TRUE_1NN_SHELL)
+        do final_site=1,n_neighbour_sites(TRUE_1NN_SHELL(crystal_structure))
           if (myrank==0) then
             t1=mpi_wtime()
           endif
@@ -1042,7 +1070,8 @@ contains
           obstructed=.false.
           if (myrank==0) then
             t1=mpi_wtime()
-            final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(final_site)
+            final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                       crystal_structure))%neighbour_sites(final_site)
             if (kmc%verbosity>=VERBOSITY_LOUD) then
               write(6,"(3(a,i0))") "# Getting rate for exchange ",&
                                    initial_id," -> ",site_id," -> ",final_id
@@ -1055,9 +1084,9 @@ contains
                 write(6,"(a)") "# Not a valid adsorption site"
               endif
               obstructed=.true.
-            elseif (nn_final<3) then
+            elseif (nn_final<N_NN_MIN(crystal_structure)) then
               if (kmc%debug .and. kmc%verbosity>=VERBOSITY_ABSURD) then
-                write(6,"(a)") "# Not a stable adsorption site - nn<3"
+                write(6,"(a,i0)") "# Not a stable adsorption site - nn<",N_NN_MIN(crystal_structure)
               endif
               obstructed=.true.
             elseif (n_near_tmp(final_id)>0) then
@@ -1351,7 +1380,7 @@ contains
       reverse_ml_full=.false.
       final_relaxed=.false.
       if (present(shell)) then
-        jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+        jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,kmc%system%crystal_structure)
         if (jump_shell<=0) then
           write(0,"(a,i0,a)") "*** Error: invalid shell ",shell," doesn't map to an allowed jump shell in get_barrier()"
           internal_error=1
@@ -1624,7 +1653,7 @@ contains
               n_check_list=n_check_list+1
               check_list(n_check_list)=kmc%system%sites(initial_id)%id
             endif
-            do nn_shell=TRUE_1NN_SHELL,CLOSE_NEIGH_SHELL
+            do nn_shell=TRUE_1NN_SHELL(kmc%system%crystal_structure),CLOSE_NEIGH_SHELL(kmc%system%crystal_structure)
               do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(nn_shell)%n_neighbour_sites
                 nn_id=kmc%system%sites(site_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_atom)
                 if (kmc%system%sites(nn_id)%Z>0 .and. .not. kmc%system%sites(nn_id)%substrate) then
@@ -2023,7 +2052,7 @@ contains
         summ=summ+rate_lowering_f*kmc%system%sites(site_id)%hop_rate
         if (summ>u) then
           do jump_shell=1,kmc%system%max_jump_shell
-            shell=JUMP_SHELLS(jump_shell)
+            shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
               if (kmc%system%sites(site_id)%hop_states(nn_atom,jump_shell)==EVENT_VALID) then
                 subsum=subsum+rate_lowering_f*kmc%system%sites(site_id)%hop_rates(nn_atom,jump_shell)
@@ -2053,8 +2082,10 @@ contains
           subsum=summ
           summ=summ+rate_lowering_f*kmc%system%sites(site_id)%exchange_rate
           if (summ>u) then
-            do initial_site=1,kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-              do final_site=1,kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
+            do initial_site=1,kmc%system%sites(site_id)%neighbour_shells(&
+                              TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites
+              do final_site=1,kmc%system%sites(site_id)%neighbour_shells(&
+                              TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites
                 if (kmc%system%sites(site_id)%exchange_states(final_site,initial_site)==EVENT_VALID) then
                   subsum=subsum+rate_lowering_f*kmc%system%sites(site_id)%exchange_rates(final_site,initial_site)
                   if (subsum>u) then
@@ -2119,7 +2150,7 @@ contains
     if (event_type==EVENT_TYPE_HOP) then
       nn_atom=a
       shell=b
-      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,kmc%system%crystal_structure)
       if (jump_shell<=0) then
         write(0,"(a,i0,a)") "*** Error: shell ",shell," doesn't map to an allowed jump shell in execute_jump_event()"
         if (present(error)) then
@@ -2184,7 +2215,7 @@ contains
         kmc%system%height=kmc%system%sites(final_id)%cartesian_coords(3)
       elseif (kmc%system%sites(final_id)%cartesian_coords(3)<kmc%system%sites(site_id)%cartesian_coords(3)) then
         if ((kmc%system%sites(final_id)%cartesian_coords(3)-kmc%system%sites(site_id)%cartesian_coords(3))**2>&
-             kmc%system%layer_separation_111_squared-DIST2_TOL) then
+             kmc%system%layer_separation_squared-DIST2_TOL) then
           if (kmc%debug .and. kmc%verbosity>=VERBOSITY_LOUD) then
             write(6,"(a,f10.4,a)") "# Descension by hopping, barrier ",barrier," eV"
           endif
@@ -2202,8 +2233,10 @@ contains
       final_site=a
       initial_site=b
 
-      initial_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(initial_site)
-      final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(final_site)
+      initial_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                   kmc%system%crystal_structure))%neighbour_sites(initial_site)
+      final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                   kmc%system%crystal_structure))%neighbour_sites(final_site)
 
       if (kmc%verbosity>=VERBOSITY_LOUD) then
         write(6,"(3(a,i0))") "# Executing exchange from ",initial_id,&
@@ -2282,7 +2315,7 @@ contains
         kmc%system%height=kmc%system%sites(final_id)%cartesian_coords(3)
       elseif (kmc%system%sites(final_id)%cartesian_coords(3)<kmc%system%sites(initial_id)%cartesian_coords(3)) then
         if ((kmc%system%sites(final_id)%cartesian_coords(3)-kmc%system%sites(initial_id)%cartesian_coords(3))**2>&
-            kmc%system%layer_separation_111_squared-DIST2_TOL) then
+            kmc%system%layer_separation_squared-DIST2_TOL) then
           if (kmc%debug .and. kmc%verbosity>=VERBOSITY_LOUD) then
             write(6,"(a,f10.4,a)") "# Descension by exchange, barrier ",barrier," eV"
           endif
@@ -2310,19 +2343,37 @@ contains
     do shell=1,kmc%system%lae_cutoff_shell
       do nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=kmc%system%sites(final_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
-        if (shell<TRUE_1NN_SHELL) then
+        if (shell<TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
           kmc%system%sites(nn_id)%n_near=kmc%system%sites(nn_id)%n_near+1
-        elseif (shell==TRUE_1NN_SHELL) then
+        elseif (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
           kmc%system%sites(nn_id)%nn=kmc%system%sites(nn_id)%nn+1
           if (.not. kmc%system%sites(nn_id)%substrate) then
             if (kmc%system%sites(nn_id)%Z<0) then
-              if (kmc%system%sites(nn_id)%nn>3) then
+              if (kmc%system%sites(nn_id)%nn>N_NN_MIN(kmc%system%crystal_structure)) then
                 kmc%system%sites(nn_id)%Z=0
-                kmc%system%sites(nn_id)%inactive_counter=0
-              elseif (kmc%system%sites(nn_id)%nn==3) then
+                if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+                  kmc%system%sites(nn_id)%inactive_counter=0
+                endif
+              elseif (kmc%system%sites(nn_id)%nn==N_NN_MIN(kmc%system%crystal_structure)) then
                 if (has_support(kmc%system,nn_id)) then
                   kmc%system%sites(nn_id)%Z=0
-                  kmc%system%sites(nn_id)%inactive_counter=0
+                  if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+                    kmc%system%sites(nn_id)%inactive_counter=0
+                  endif
+                endif
+              endif
+            endif
+          endif
+        elseif (shell==TRUE_2NN_SHELL(kmc%system%crystal_structure) &
+                .and. kmc%system%crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+          if (.not. kmc%system%sites(nn_id)%substrate) then
+            if (kmc%system%sites(nn_id)%Z<0) then
+              if (kmc%system%sites(nn_id)%nn==N_NN_MIN(kmc%system%crystal_structure)) then
+                if (has_support(kmc%system,nn_id)) then
+                  kmc%system%sites(nn_id)%Z=0
+                  if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+                    kmc%system%sites(nn_id)%inactive_counter=0
+                  endif
                 endif
               endif
             endif
@@ -2330,30 +2381,35 @@ contains
         endif
         if (kmc%system%sites(nn_id)%Z>0 .and. .not. kmc%system%sites(nn_id)%substrate) then
           do jump_shell=1,kmc%system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             kmc%system%sites(nn_id)%hop_states(1:kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites,&
               jump_shell)=EVENT_LAE_CHANGED
           end do
           if (kmc%system%allow_exchange) then
             kmc%system%sites(nn_id)%exchange_states(&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites,&
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
           endif
           kmc%system%sites(nn_id)%jumps_checked=.false.
 
-          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,kmc%system%crystal_structure)
+          if (jump_shell>kmc%system%max_jump_shell) then
+            jump_shell=0
+          endif
           if (jump_shell>0) then
             reverse_nn_atom=kmc%system%sites(final_id)%neighbour_shells(shell)%reverse_indices(nn_atom)
             kmc%system%sites(nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_FORBIDDEN
             if (kmc%system%allow_exchange) then
-              if (shell==TRUE_1NN_SHELL) then
+              if (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                 kmc%system%sites(nn_id)%exchange_states(reverse_nn_atom,:)=EVENT_FORBIDDEN
               endif
             endif
           endif
         elseif (kmc%system%sites(nn_id)%Z==0) then
           do jump_shell=1,kmc%system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             do nn_nn_atom=1,kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites
               nn_nn_id=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
               if (kmc%system%sites(nn_nn_id)%Z>0 .and. .not. kmc%system%sites(nn_nn_id)%substrate) then
@@ -2361,10 +2417,10 @@ contains
                 reverse_nn_atom=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                 kmc%system%sites(nn_nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_LAE_CHANGED
                 if (kmc%system%allow_exchange) then
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                     kmc%system%sites(nn_nn_id)%exchange_states(&
                       reverse_nn_atom,&
-                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_LAE_CHANGED
                   endif
                 endif
@@ -2377,17 +2433,28 @@ contains
       do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=kmc%system%sites(site_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
         if (event_type==EVENT_TYPE_HOP) then
-          if (shell<TRUE_1NN_SHELL) then
+          if (shell<TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
             kmc%system%sites(nn_id)%n_near=kmc%system%sites(nn_id)%n_near-1
-            if (kmc%system%sites(nn_id)%n_near<2) then
-              kmc%system%sites(nn_id)%inactive_counter=0
+            if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              if (kmc%system%sites(nn_id)%n_near<2) then
+                kmc%system%sites(nn_id)%inactive_counter=0
+              endif
             endif
-          elseif (shell==TRUE_1NN_SHELL) then
+          elseif (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
             kmc%system%sites(nn_id)%nn=kmc%system%sites(nn_id)%nn-1
             if (kmc%system%sites(nn_id)%Z==0) then
-              if (kmc%system%sites(nn_id)%nn<3) then
+              if (kmc%system%sites(nn_id)%nn<N_NN_MIN(kmc%system%crystal_structure)) then
                 kmc%system%sites(nn_id)%Z=-1
-              elseif (kmc%system%sites(nn_id)%nn==3) then
+              elseif (kmc%system%sites(nn_id)%nn==N_NN_MIN(kmc%system%crystal_structure)) then
+                if (.not. has_support(kmc%system,nn_id)) then
+                  kmc%system%sites(nn_id)%Z=-1
+                endif
+              endif
+            endif
+          elseif (shell==TRUE_2NN_SHELL(kmc%system%crystal_structure) &
+                  .and. kmc%system%crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+            if (kmc%system%sites(nn_id)%Z==0) then
+              if (kmc%system%sites(nn_id)%nn==N_NN_MIN(kmc%system%crystal_structure)) then
                 if (.not. has_support(kmc%system,nn_id)) then
                   kmc%system%sites(nn_id)%Z=-1
                 endif
@@ -2397,19 +2464,21 @@ contains
         endif
         if (kmc%system%sites(nn_id)%Z>0 .and. .not. kmc%system%sites(nn_id)%substrate) then
           do jump_shell=1,kmc%system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             kmc%system%sites(nn_id)%hop_states(1:kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites,&
               jump_shell)=EVENT_LAE_CHANGED
           end do
           if (kmc%system%allow_exchange) then
             kmc%system%sites(nn_id)%exchange_states(&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites,&
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
           endif
           kmc%system%sites(nn_id)%jumps_checked=.false.
 
           if (event_type==EVENT_TYPE_HOP) then
-            if (shell==TRUE_1NN_SHELL) then
+            if (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
               reverse_nn_atom=kmc%system%sites(site_id)%neighbour_shells(shell)%reverse_indices(nn_atom)
               if (kmc%system%allow_exchange) then
                 kmc%system%sites(nn_id)%exchange_states(:,reverse_nn_atom)=EVENT_FORBIDDEN
@@ -2418,7 +2487,7 @@ contains
           endif
         elseif (kmc%system%sites(nn_id)%Z==0) then
           do jump_shell=1,kmc%system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             do nn_nn_atom=1,kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites
               nn_nn_id=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
               if (kmc%system%sites(nn_nn_id)%Z>0 .and. .not. kmc%system%sites(nn_nn_id)%substrate) then
@@ -2426,10 +2495,10 @@ contains
                 reverse_nn_atom=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                 kmc%system%sites(nn_nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_LAE_CHANGED
                 if (kmc%system%allow_exchange) then
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                     kmc%system%sites(nn_nn_id)%exchange_states(&
                       reverse_nn_atom,&
-                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_LAE_CHANGED
                   endif
                 endif
@@ -2438,7 +2507,7 @@ contains
           end do
         else ! Z<0
           do jump_shell=1,kmc%system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
             do nn_nn_atom=1,kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites
               nn_nn_id=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
               if (kmc%system%sites(nn_nn_id)%Z>0 .and. .not. kmc%system%sites(nn_nn_id)%substrate) then
@@ -2446,10 +2515,10 @@ contains
                 reverse_nn_atom=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                 kmc%system%sites(nn_nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_FORBIDDEN
                 if (kmc%system%allow_exchange) then
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                     kmc%system%sites(nn_nn_id)%exchange_states(&
                       reverse_nn_atom,&
-                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_FORBIDDEN
                   endif
                 endif
@@ -2463,17 +2532,19 @@ contains
       if (event_type==EVENT_TYPE_EXCHANGE) then
         do nn_atom=1,kmc%system%sites(initial_id)%neighbour_shells(shell)%n_neighbour_sites
           nn_id=kmc%system%sites(initial_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
-          if (shell<TRUE_1NN_SHELL) then
+          if (shell<TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
             kmc%system%sites(nn_id)%n_near=kmc%system%sites(nn_id)%n_near-1
-            if (kmc%system%sites(nn_id)%n_near<2) then
-              kmc%system%sites(nn_id)%inactive_counter=0
+            if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              if (kmc%system%sites(nn_id)%n_near<2) then
+                kmc%system%sites(nn_id)%inactive_counter=0
+              endif
             endif
-          elseif (shell==TRUE_1NN_SHELL) then
+          elseif (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
             kmc%system%sites(nn_id)%nn=kmc%system%sites(nn_id)%nn-1
             if (kmc%system%sites(nn_id)%Z==0) then
-              if (kmc%system%sites(nn_id)%nn<3) then
+              if (kmc%system%sites(nn_id)%nn<N_NN_MIN(kmc%system%crystal_structure)) then
                 kmc%system%sites(nn_id)%Z=-1
-              elseif (kmc%system%sites(nn_id)%nn==3) then
+              elseif (kmc%system%sites(nn_id)%nn==N_NN_MIN(kmc%system%crystal_structure)) then
                 if (.not. has_support(kmc%system,nn_id)) then
                   kmc%system%sites(nn_id)%Z=-1
                 endif
@@ -2482,32 +2553,34 @@ contains
           endif
           if (kmc%system%sites(nn_id)%Z>0 .and. .not. kmc%system%sites(nn_id)%substrate) then
             do jump_shell=1,kmc%system%max_jump_shell
-              nn_shell=JUMP_SHELLS(jump_shell)
+              nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
               kmc%system%sites(nn_id)%hop_states(1:kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites,&
                 jump_shell)=EVENT_LAE_CHANGED
             end do
             kmc%system%sites(nn_id)%exchange_states(&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites,&
+              1:kmc%system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              kmc%system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
             kmc%system%sites(nn_id)%jumps_checked=.false.
 
-            if (shell==TRUE_1NN_SHELL) then
+            if (shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
               reverse_nn_atom=kmc%system%sites(initial_id)%neighbour_shells(shell)%reverse_indices(nn_atom)
               kmc%system%sites(nn_id)%exchange_states(:,reverse_nn_atom)=EVENT_FORBIDDEN
             endif
           elseif (kmc%system%sites(nn_id)%Z==0) then
             do jump_shell=1,kmc%system%max_jump_shell
-              nn_shell=JUMP_SHELLS(jump_shell)
+              nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
               do nn_nn_atom=1,kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites
                 nn_nn_id=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
                 if (kmc%system%sites(nn_nn_id)%Z>0 .and. .not. kmc%system%sites(nn_nn_id)%substrate) then
                   kmc%system%sites(nn_nn_id)%jumps_checked=.false.
                   reverse_nn_atom=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                   kmc%system%sites(nn_nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_LAE_CHANGED
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                     kmc%system%sites(nn_nn_id)%exchange_states(&
                       reverse_nn_atom,&
-                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_LAE_CHANGED
                   endif
                 endif
@@ -2515,17 +2588,17 @@ contains
             end do
           else ! Z<0
             do jump_shell=1,kmc%system%max_jump_shell
-              nn_shell=JUMP_SHELLS(jump_shell)
+              nn_shell=JUMP_SHELLS(jump_shell,kmc%system%crystal_structure)
               do nn_nn_atom=1,kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites
                 nn_nn_id=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
                 if (kmc%system%sites(nn_nn_id)%Z>0 .and. .not. kmc%system%sites(nn_nn_id)%substrate) then
                   kmc%system%sites(nn_nn_id)%jumps_checked=.false.
                   reverse_nn_atom=kmc%system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                   kmc%system%sites(nn_nn_id)%hop_states(reverse_nn_atom,jump_shell)=EVENT_FORBIDDEN
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(kmc%system%crystal_structure)) then
                     kmc%system%sites(nn_nn_id)%exchange_states(&
                       reverse_nn_atom,&
-                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:kmc%system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(kmc%system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_FORBIDDEN
                   endif
                 endif
@@ -2540,7 +2613,7 @@ contains
     if (event_type==EVENT_TYPE_HOP) then
       nn_atom=a
       shell=b
-      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,kmc%system%crystal_structure)
 
       ! Reverse jump validity
       ! Check minimization cache for a hit of initial state minimization
@@ -2581,8 +2654,10 @@ contains
       final_site=a
       initial_site=b
 
-      initial_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(initial_site)
-      final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(final_site)
+      initial_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                   kmc%system%crystal_structure))%neighbour_sites(initial_site)
+      final_id=kmc%system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                   kmc%system%crystal_structure))%neighbour_sites(final_site)
 
       ! Reverse jump validity
       nn_initial=kmc%system%sites(final_id)%nn
@@ -2626,15 +2701,17 @@ contains
 
     endif
 
-    ! Find new adsorption sites around the final site
-    call find_new_sites(kmc%system,final_id,error=internal_error)
-    if (internal_error/=0) then
-      write(0,"(a,i0,a)") "*** Error finding new sites around site ",&
-                          final_id," in execute_jump_event()"
-      if (present(error)) then
-        error=internal_error
+    if (kmc%system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      ! Find new adsorption sites around the final site
+      call find_new_sites(kmc%system,final_id,error=internal_error)
+      if (internal_error/=0) then
+        write(0,"(a,i0,a)") "*** Error finding new sites around site ",&
+                            final_id," in execute_jump_event()"
+        if (present(error)) then
+          error=internal_error
+        endif
+        return
       endif
-      return
     endif
 
     ! Update lockedness
@@ -2746,7 +2823,7 @@ contains
 
     ! Neighbourhood of site_id
     t1=mpi_wtime()
-    do shell=TRUE_1NN_SHELL,kmc%system%lae_cutoff_shell
+    do shell=TRUE_1NN_SHELL(kmc%system%crystal_structure),kmc%system%lae_cutoff_shell
       do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=kmc%system%sites(site_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
         if (kmc%system%sites(nn_id)%Z>0) then
@@ -2765,7 +2842,7 @@ contains
     end do
 
     ! Neighbourhood of final_id
-    do shell=TRUE_1NN_SHELL,kmc%system%lae_cutoff_shell
+    do shell=TRUE_1NN_SHELL(kmc%system%crystal_structure),kmc%system%lae_cutoff_shell
       do nn_atom=1,kmc%system%sites(final_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=kmc%system%sites(final_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
         if (kmc%system%sites(nn_id)%Z>0) then
@@ -2785,7 +2862,7 @@ contains
 
     if (jump_type==EVENT_TYPE_EXCHANGE) then
       ! Neighbourhood of initial_id
-      do shell=TRUE_1NN_SHELL,kmc%system%lae_cutoff_shell
+      do shell=TRUE_1NN_SHELL(kmc%system%crystal_structure),kmc%system%lae_cutoff_shell
         do nn_atom=1,kmc%system%sites(initial_id)%neighbour_shells(shell)%n_neighbour_sites
           nn_id=kmc%system%sites(initial_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
           if (kmc%system%sites(nn_id)%Z>0) then
@@ -2836,7 +2913,7 @@ contains
     ! Default "only-substrate jump". Changed to hcp-fcc if off-lattice is detected
     jump_type=SUBSTRATE_FCC_HCP
 
-    do shell=TRUE_1NN_SHELL,kmc%system%lae_cutoff_shell
+    do shell=TRUE_1NN_SHELL(kmc%system%crystal_structure),kmc%system%lae_cutoff_shell
       do nn_atom=1,kmc%system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=kmc%system%sites(site_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
         if (kmc%system%sites(nn_id)%Z>0) then
@@ -2845,7 +2922,7 @@ contains
             jump_type=SUBSTRATE_NOT
             return
           ! Off-lattice site:
-          elseif (shell>TRUE_2NN_SHELL .and. shell<TRUE_3NN_SHELL) then
+          elseif (shell>TRUE_2NN_SHELL(kmc%system%crystal_structure) .and. shell<TRUE_3NN_SHELL(kmc%system%crystal_structure)) then
             jump_type=SUBSTRATE_HCP_FCC
           endif
         endif
@@ -2895,9 +2972,9 @@ contains
     internal_error=0
 
     do shell=1,kmc%system%max_jump_shell
-      do coord_target=3,N_NN_MAX
-        do coord_jumping=3,LOCK_THRESHOLD
-          if (coord_jumping<N_NN_MAX) then
+      do coord_target=N_NN_MIN(kmc%system%crystal_structure),N_NN_MAX(kmc%system%crystal_structure)
+        do coord_jumping=N_NN_MIN(kmc%system%crystal_structure),LOCK_THRESHOLD(kmc%system%crystal_structure)
+          if (coord_jumping<N_NN_MAX(kmc%system%crystal_structure)) then
             if (kmc%hop_predictor(coord_jumping,coord_target,shell)%initialised) then
               if (kmc%hop_predictor(coord_jumping,coord_target,shell)%changed) then
                 call print_predictor_xml(kmc%hop_predictor(coord_jumping,coord_target,shell),&
@@ -2916,7 +2993,7 @@ contains
           endif
           if (kmc%system%allow_exchange) then
             if (shell==1) then
-              do coord_middle=3,N_NN_MAX-1
+              do coord_middle=N_NN_MIN(kmc%system%crystal_structure),N_NN_MAX(kmc%system%crystal_structure)-1
                 if (kmc%exchange_predictor(coord_middle,coord_jumping,coord_target)%initialised) then
                   if (kmc%exchange_predictor(coord_middle,coord_jumping,coord_target)%changed) then
                     call print_predictor_xml(kmc%exchange_predictor(coord_middle,coord_jumping,&
@@ -3003,10 +3080,11 @@ contains
     endif
     internal_error=0
 
-    do i=1,system%sites(id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      nn_id=system%sites(id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(i)
+    do i=1,system%sites(id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      nn_id=system%sites(id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(i)
       if (nn_id<=0 .or. nn_id>system%n_sites) then
-        write(0,"(a,i0,a,i0,a,i0,a)") "*** Error: nn_atom ",i," of site ",id," on shell ",TRUE_1NN_SHELL,&
+        write(0,"(a,i0,a,i0,a,i0,a)") "*** Error: nn_atom ",i," of site ",id," on shell ",&
+                                      TRUE_1NN_SHELL(system%crystal_structure),&
                                       " has invalid id ",nn_id," in color_islands()"
         if (present(error)) then
           error=1

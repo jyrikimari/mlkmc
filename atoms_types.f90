@@ -59,6 +59,7 @@ module mlkmc_atoms_types_module
   end type t_site
 
   type t_system
+    integer :: orientation,crystal_structure
     integer :: n_sites=0,n_substrate=0,n_deposited=0
     integer,allocatable :: deposited_atoms(:)
     real(kind=rk) :: lattice_constant,max_jump_dist,lae_cutoff_dist,height
@@ -73,7 +74,7 @@ module mlkmc_atoms_types_module
     real(kind=rk) :: first_atom_unwrapped_coords(3)
 
     real(kind=rk) :: nn_dist2,relax_displacement_tol2
-    real(kind=rk) :: layer_separation_111,layer_separation_111_squared
+    real(kind=rk) :: layer_separation,layer_separation_squared
 
     real(kind=rk) :: one_box_dim(3)
     integer :: n_boxes(3)

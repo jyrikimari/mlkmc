@@ -1,4 +1,4 @@
-! MLKMC - program for merging predictor directories and md stats
+! MLKMC - program for merging predictor directories
 ! The merge result can contain duplicates, run remove_duplicates after
 ! 
 ! Copyright (C) 2026 Jyri Kimari
@@ -96,8 +96,8 @@ program merge_predictors
   call verbosity_push(PRINT_SILENT)
 
   do shell=1,N_JUMP_SHELLS
-    do coord_target=3,N_NN_MAX
-      do coord_jumping=3,LOCK_THRESHOLD
+    do coord_target=3,maxval(N_NN_MAX)
+      do coord_jumping=3,maxval(LOCK_THRESHOLD)
         predictor_file="predictors/hop_predictor_"//coord_jumping//"_"//coord_target//"_"//shell//".xml"
 
         inquire(file=trim(source1_dir)//"/"//trim(predictor_file),exist=exist)
@@ -160,7 +160,7 @@ program merge_predictors
         call finalise_predictor(source2_predictor)
 
         if (shell==1) then
-          do coord_middle=3,N_NN_MAX-1
+          do coord_middle=3,maxval(N_NN_MAX)-1
             predictor_file="predictors/exchange_predictor_"//coord_middle//"_"//coord_jumping//"_"//coord_target//".xml"
 
             inquire(file=trim(source1_dir)//"/"//trim(predictor_file),exist=exist)
@@ -247,38 +247,4 @@ contains
     
   end subroutine read_cmd
   
-  integer function get_max_jump_shell(filename,error)
-    ! Linus Torvalds forgive me
-    character(len=*),intent(in) :: filename
-    integer,optional,intent(out) :: error
-
-    integer :: n,ios,fileunit
-
-    if (present(error)) then
-      error=0
-    endif
-
-    open(newunit=fileunit,file=filename,action="read",iostat=ios)
-    if (ios/=0) then
-      write(0,"(a)") "*** Error opening file "//trim(filename)
-      if (present(error)) then
-        error=ios
-      endif
-      return
-    endif
-
-    n=0
-    do
-      read(fileunit,*,iostat=ios)
-      if (ios/=0) then
-        exit
-      endif
-      n=n+1
-    end do
-
-    get_max_jump_shell=(n-(N_NN_MAX-3+1)*(LOCK_THRESHOLD-3+1)*(N_NN_MAX-3))/(LOCK_THRESHOLD-3+1)/(N_NN_MAX-3+1)
-
-    close(fileunit)
-  end function get_max_jump_shell
-
 end program merge_predictors

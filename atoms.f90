@@ -27,15 +27,16 @@ module mlkmc_atoms_module
 
 contains
 
-  subroutine create_system(system,xmax,ymax,zmax,lattice_constant,substrate_layers,&
-                           species,substrate_type,max_jump_nth,lae_cutoff_nth,allow_exchange,periodic,&
-                           initial_atoms,initial_atoms_layers,initial_atoms_termination,initial_atoms_coords,error)
+  subroutine create_system(system,xmax,ymax,zmax,orientation,crystal_structure,lattice_constant,substrate_layers,&
+                           species,substrate_type,max_jump_nth,lae_cutoff_nth,initial_atoms,initial_atoms_layers,&
+                           initial_atoms_termination,initial_atoms_coords,allow_exchange,periodic,hcp_flag,error)
     type(t_system),intent(inout) :: system
-    integer,intent(in) :: xmax,ymax,zmax,substrate_layers,species,substrate_type,max_jump_nth,lae_cutoff_nth
+    integer,intent(in) :: xmax,ymax,zmax,orientation,crystal_structure
+    integer,intent(in) :: substrate_layers,species,substrate_type,max_jump_nth,lae_cutoff_nth
     integer,intent(in) :: initial_atoms(:),initial_atoms_layers(:),initial_atoms_termination(:)
     double precision,intent(in) :: initial_atoms_coords(:,:)
     real(kind=rk),intent(in) :: lattice_constant
-    logical,optional,intent(in) :: allow_exchange,periodic(3)
+    logical,optional,intent(in) :: allow_exchange,periodic(3),hcp_flag
     integer,optional,intent(out) :: error
 
     integer :: i,j,x,y,z,p,internal_error,n_substrate,n_frozen_substrate,n_sites_old,deptype
@@ -46,23 +47,39 @@ contains
     endif
 
     system%lattice_constant=lattice_constant
-    system%nn_dist2=(NEIGH_DIST_FACT(1)*lattice_constant)**2
+    system%orientation=orientation
+    system%crystal_structure=crystal_structure
+    system%nn_dist2=(NEIGH_DIST_FACT(1,crystal_structure)*lattice_constant)**2
     system%relax_displacement_tol2=0.25_rk*system%nn_dist2
-    system%layer_separation_111=lattice_constant/sqrt(3.0_rk)
-    system%layer_separation_111_squared=system%layer_separation_111**2
+    if (orientation==ORIENTATION_111 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      system%layer_separation=lattice_constant/sqrt(3.0_rk)
+    elseif (orientation==ORIENTATION_110 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      system%layer_separation=lattice_constant/sqrt(2.0_rk)
+    elseif (orientation==ORIENTATION_100 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      system%layer_separation=0.5_rk*lattice_constant
+    elseif (orientation==ORIENTATION_111 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+      system%layer_separation=lattice_constant*sqrt(3.0_rk)/5.0_rk
+    elseif (orientation==ORIENTATION_110 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+      system%layer_separation=lattice_constant/sqrt(2.0_rk)
+    elseif (orientation==ORIENTATION_100 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+      system%layer_separation=0.5_rk*lattice_constant
+    endif
+    system%layer_separation_squared=system%layer_separation**2
     system%lattice=0
-    system%lattice(1,1)=xmax*UNIT_CELL(1)*lattice_constant
-    system%lattice(2,2)=ymax*UNIT_CELL(2)*lattice_constant
-    system%lattice(3,3)=zmax*UNIT_CELL(3)*lattice_constant
+    system%lattice(1,1)=xmax*UNIT_CELL(1,orientation,crystal_structure)*lattice_constant
+    system%lattice(2,2)=ymax*UNIT_CELL(2,orientation,crystal_structure)*lattice_constant
+    system%lattice(3,3)=zmax*UNIT_CELL(3,orientation,crystal_structure)*lattice_constant
     write(6,"(a,3(f8.4,a))") "# Lattice: ",system%lattice(1,1)," x ",system%lattice(2,2)," x ",system%lattice(3,3)," Å^3"
-    write(6,"(a,i0,a)") "# Monolayer size: ",2*xmax*ymax," atoms"
+    write(6,"(a,i0,a)") "# Monolayer size: ",ATOMS_IN_LAYER(orientation,crystal_structure)*xmax*ymax," atoms"
     select case(max_jump_nth)
       case(1)
-        system%max_jump_shell=TRUE_1NN_JUMP_SHELL
+        system%max_jump_shell=TRUE_1NN_JUMP_SHELL(system%crystal_structure)
       case(2)
-        system%max_jump_shell=TRUE_2NN_JUMP_SHELL
+        system%max_jump_shell=TRUE_2NN_JUMP_SHELL(system%crystal_structure)
       case(3)
-        system%max_jump_shell=TRUE_3NN_JUMP_SHELL
+        system%max_jump_shell=TRUE_3NN_JUMP_SHELL(system%crystal_structure)
+      case(4)
+        system%max_jump_shell=TRUE_4NN_JUMP_SHELL(system%crystal_structure)
       case default
         write(0,"(a,i0)") "*** Error: invalid max_jump_nth ",max_jump_nth
         if (present(error)) then
@@ -73,13 +90,13 @@ contains
 
     select case(lae_cutoff_nth)
       case(1)
-        system%lae_cutoff_shell=TRUE_1NN_SHELL
+        system%lae_cutoff_shell=TRUE_1NN_SHELL(system%crystal_structure)
       case(2)
-        system%lae_cutoff_shell=TRUE_2NN_SHELL
+        system%lae_cutoff_shell=TRUE_2NN_SHELL(system%crystal_structure)
       case(3)
-        system%lae_cutoff_shell=TRUE_3NN_SHELL
+        system%lae_cutoff_shell=TRUE_3NN_SHELL(system%crystal_structure)
       case(4)
-        system%lae_cutoff_shell=TRUE_4NN_SHELL
+        system%lae_cutoff_shell=TRUE_4NN_SHELL(system%crystal_structure)
       case default
         write(0,"(a,i0)") "*** Error: invalid lae_cutoff_nth ",lae_cutoff_nth
         if (present(error)) then
@@ -88,7 +105,7 @@ contains
         return
     end select
 
-    system%lae_cutoff_dist=get_Xnn_dist(lattice_constant,lae_cutoff_nth,error=internal_error)
+    system%lae_cutoff_dist=get_Xnn_dist(lattice_constant,system%crystal_structure,lae_cutoff_nth,error=internal_error)
     if (internal_error/=0) then
       write(0,"(a)") "*** Error: couldn't set lae_cutoff_dist based on lae_cutoff_nth"
       if (present(error)) then
@@ -97,7 +114,7 @@ contains
       return
     endif
 
-    system%max_jump_dist=get_Xnn_dist(lattice_constant,max_jump_nth,error=internal_error)
+    system%max_jump_dist=get_Xnn_dist(lattice_constant,system%crystal_structure,max_jump_nth,error=internal_error)
     if (internal_error/=0) then
       write(0,"(a)") "*** Error: couldn't set max_jump_dist based on max_jump_nth"
       if (present(error)) then
@@ -119,7 +136,7 @@ contains
     allocate(system%sites(BUFFER_SIZE))
 
     system%frozen_substrate%first_id=1
-    system%frozen_substrate%last_id=2*xmax*ymax
+    system%frozen_substrate%last_id=ATOMS_IN_LAYER(orientation,crystal_structure)*xmax*ymax
     allocate(system%frozen_substrate%pos(3,system%frozen_substrate%first_id:system%frozen_substrate%last_id))
     system%frozen_substrate%pos=0.0_rk
     allocate(system%frozen_substrate%atom_type(system%frozen_substrate%first_id:system%frozen_substrate%last_id))
@@ -128,7 +145,11 @@ contains
     system%frozen_substrate%Z=species
 
     system%substrate%first_id=system%frozen_substrate%last_id+1
-    system%substrate%last_id=6*xmax*ymax*substrate_layers
+    if (hcp_flag) then
+      system%substrate%last_id=4*xmax*ymax*substrate_layers
+    else
+      system%substrate%last_id=P_MAX(orientation,crystal_structure)*xmax*ymax*substrate_layers
+    endif
     allocate(system%substrate%pos(3,system%substrate%first_id:system%substrate%last_id))
     system%substrate%pos=0.0d0
     allocate(system%substrate%atom_type(system%substrate%first_id:system%substrate%last_id))
@@ -136,7 +157,7 @@ contains
     allocate(system%substrate%Z(system%substrate%first_id:system%substrate%last_id))
     system%substrate%Z=species
 
-    furthest_nn_dist=get_Xnn_dist(lattice_constant,lae_cutoff_nth,error=internal_error)
+    furthest_nn_dist=get_Xnn_dist(lattice_constant,system%crystal_structure,lae_cutoff_nth,error=internal_error)
     if (internal_error/=0) then
       write(0,"(a,i0,a)") "*** Error: couldn't get ",lae_cutoff_nth,"-nearest neighbour distance"
       if (present(error)) then
@@ -159,12 +180,18 @@ contains
     n_frozen_substrate=0
     n_substrate=0
     system%height=0.0_rk
-    write(6,"(a)",advance="no") "# Generating initial fcc sites..."
+    write(6,"(a)",advance="no") "# Generating substrate..."
     do z=0,substrate_layers-1
       do y=0,ymax-1
         do x=0,xmax-1
-          do p=1,6
-            call add_site(system,get_cartesian(x,y,z,p)*lattice_constant,error=internal_error)
+          do p=1,P_MAX(orientation,crystal_structure)
+            if (hcp_flag) then
+              if (p>4) then
+                cycle
+              endif
+            endif
+            call add_site(system,get_cartesian(x,y,z,p,orientation,crystal_structure,hcp_flag)*lattice_constant,&
+                            error=internal_error)
             if (internal_error/=0) then
               write(0,"(a)") "*** Error adding site while generating substrate in create_system()"
               if (present(error)) then
@@ -172,47 +199,203 @@ contains
               endif
               return
             endif
-            system%n_substrate=system%n_substrate+1
             system%sites(system%n_sites)%Z=species
             system%sites(system%n_sites)%atom_type=1
+            system%n_substrate=system%n_substrate+1
             system%sites(system%n_sites)%id=system%n_substrate
             system%sites(system%n_sites)%substrate=.true.
             if (system%sites(system%n_sites)%cartesian_coords(3)>system%height) then
               system%height=system%sites(system%n_sites)%cartesian_coords(3)
             endif
-            if (z==0 .and. p<=2) then
+            if (z==0 .and. p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
               n_frozen_substrate=n_frozen_substrate+1
               system%frozen_substrate%pos(:,n_frozen_substrate)=system%sites(system%n_sites)%cartesian_coords(:)
             else
               n_substrate=n_substrate+1
               system%substrate%pos(:,system%frozen_substrate%last_id+n_substrate)=system%sites(system%n_sites)%cartesian_coords(:)
             endif
-            if (z==substrate_layers-1 .and. p>=5) then
-              call create_neighbour_list(system,system%n_sites)
-              system%sites(system%n_sites)%nn=N_NN_MAX-3
-            else
-              system%sites(system%n_sites)%nn=N_NN_MAX
+            if (orientation==ORIENTATION_111 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              if (hcp_flag) then
+                if (z==substrate_layers-1 .and. p>2) then
+                  call create_neighbour_list(system,system%n_sites)
+                else
+                  system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+                endif
+              else
+                if (z==substrate_layers-1 &
+                    .and. p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  call create_neighbour_list(system,system%n_sites)
+                  system%sites(system%n_sites)%nn=9
+                else
+                  system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+                endif
+              endif
+            else if (orientation==ORIENTATION_110 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              if (z==substrate_layers-1&
+                  .and. p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=7
+              else if (z==substrate_layers-1&
+                       .and. p<=P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=11
+              else
+                system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+              endif
+            else if (orientation==ORIENTATION_100 .and. crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+              if (z==substrate_layers-1 .and.&
+                  p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=8
+              else
+                system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+              endif
+            else if (orientation==ORIENTATION_111 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+              if (z==substrate_layers-1&
+                  .and. p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=4
+              else if (z==substrate_layers-1 &
+                       .and. p<=P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure) &
+                       .and. p>P_MAX(orientation,crystal_structure)-3*ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=7
+              else
+                system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+              endif
+            else if (orientation==ORIENTATION_110 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+              if (z==substrate_layers-1&
+                  .and. p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=6
+              else
+                system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+              endif
+            else if (orientation==ORIENTATION_100 .and. crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+              if (z==substrate_layers-1&
+                  .and. p>P_MAX(orientation,crystal_structure)-ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                call create_neighbour_list(system,system%n_sites)
+                system%sites(system%n_sites)%nn=4
+              else
+                system%sites(system%n_sites)%nn=N_NN_MAX(system%crystal_structure)
+              endif
             endif
           end do
         end do
       end do
     end do
     write(6,"(a)") " done"
-    write(6,"(a,i0,a)") "# Generated ",system%n_sites," initial fcc sites"
-
-    write(6,"(a)",advance="no") "# Adding initial adsorption sites..."
     system%substrate_type=substrate_type
-    n_sites_old=system%n_sites
-    call add_adsorption_sites(system,error=internal_error)
-    if (internal_error/=0) then
-      write(0,"(a)") "*** Error adding adsorption sites in create_system()"
-      if (present(error)) then
-        error=internal_error
+
+    if (crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      write(6,"(a,i0,a)") "# Generated ",system%n_sites," initial fcc sites"
+      write(6,"(a)",advance="no") "# Adding initial adsorption sites..."
+      n_sites_old=system%n_sites
+      if (orientation==ORIENTATION_111) then
+        call add_adsorption_sites(system,error=internal_error)
+        if (internal_error/=0) then
+          write(0,"(a)") "*** Error adding adsorption sites in create_system()"
+          if (present(error)) then
+            error=internal_error
+          endif
+          return
+        endif
+        write(6,"(a)") " done"
+        write(6,"(a,i0,a)") "# Added ",system%n_sites-n_sites_old," adsorption sites"
+      else
+        do y=0,ymax-1
+          do x=0,xmax-1
+            do p=1,2*ATOMS_IN_LAYER(orientation,crystal_structure)
+              call add_site(system,get_cartesian(x,y,substrate_layers,p,orientation,crystal_structure,hcp_flag)*lattice_constant,&
+                            error=internal_error)
+              if (internal_error/=0) then
+                write(0,"(a)") "*** Error adding empty bcc site while generating in create_system()"
+                if (present(error)) then
+                  error=internal_error
+                endif
+                return
+              endif
+              system%sites(system%n_sites)%initial_site=.true.
+              call create_neighbour_list(system,system%n_sites)
+              if (orientation==ORIENTATION_110) then
+                if (p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=0
+                  system%sites(system%n_sites)%nn=5
+                else
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=1
+                endif
+              else if (orientation==ORIENTATION_100) then
+                if (p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=0
+                  system%sites(system%n_sites)%nn=4
+                else
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=0
+                endif
+              endif
+            end do
+          end do
+        end do
+        write(6,"(a)") " done"
+        write(6,"(a,i0,a)") "# Added ",system%n_sites-n_sites_old," adsorption sites"
       endif
-      return
+    else
+      write(6,"(a,i0,a)") "# Generated ",system%n_sites," bcc substrate sites"
+      write(6,"(a)",advance="no") "# Adding empty sites..."
+      n_sites_old=system%n_sites
+      do z=substrate_layers,zmax
+        do y=0,ymax-1
+          do x=0,xmax-1
+            do p=1,P_MAX(orientation,crystal_structure)
+              call add_site(system,get_cartesian(x,y,z,p,orientation,crystal_structure,hcp_flag)*lattice_constant,&
+                            error=internal_error)
+              if (internal_error/=0) then
+                write(0,"(a)") "*** Error adding empty bcc site while generating in create_system()"
+                if (present(error)) then
+                  error=internal_error
+                endif
+                return
+              endif
+              call create_neighbour_list(system,system%n_sites)
+              if (orientation==ORIENTATION_111) then
+                if (z==substrate_layers .and. p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=0
+                  system%sites(system%n_sites)%nn=4
+                else if (z==substrate_layers .and. p<=3*ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=1
+                !else if (z==substrate_layers .and. p<=3*ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                !  system%sites(system%n_sites)%Z=-1
+                !  system%sites(system%n_sites)%nn=1
+                else
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=0
+                endif
+              else if (orientation==ORIENTATION_110) then
+                if (z==substrate_layers .and. p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=0
+                  system%sites(system%n_sites)%nn=2
+                else
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=0
+                endif
+              else if (orientation==ORIENTATION_100) then
+                if (z==substrate_layers .and. p<=ATOMS_IN_LAYER(orientation,crystal_structure)) then
+                  system%sites(system%n_sites)%Z=0
+                  system%sites(system%n_sites)%nn=4
+                else
+                  system%sites(system%n_sites)%Z=-1
+                  system%sites(system%n_sites)%nn=0
+                endif
+              endif
+            end do
+          end do
+        end do
+      end do
+      write(6,"(a)") " done"
+      write(6,"(a,i0,a)") "# Added ",system%n_sites-n_sites_old," empty sites"
     endif
-    write(6,"(a)") " done"
-    write(6,"(a,i0,a)") "# Added ",system%n_sites-n_sites_old," adsorption sites"
 
     select case(substrate_type)
       case(SUBSTRATE_TYPE_REGULAR)
@@ -223,6 +406,21 @@ contains
 
     allocate(system%deposited_atoms(BUFFER_SIZE))
     system%deposited_atoms=0
+
+    if (orientation/=ORIENTATION_111 .or. crystal_structure/=CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      ! For all other systems except fcc {111}, we add an additional monolayer to allow exchange events
+      write(6,"(a)",advance="no") "# Adding an extra monolayer for non-fcc{111} system..."
+      call add_monolayer(system,species,deptype,error=internal_error)
+      if (internal_error/=0) then
+        write(0,"(a,i0,a)") "*** Error adding extra monolayer in create_system()"
+        if (present(error)) then
+          error=internal_error
+        endif
+        return
+      endif
+      write(6,"(a)") " done"
+    endif
+
     do i=1,size(initial_atoms)
       select case(initial_atoms(i))
         case(INITIAL_ATOMS_RANDOM)
@@ -458,7 +656,7 @@ contains
     integer :: j,shell,nn_site
 
     system%sites(i)%n_near=0
-    do shell=1,TRUE_1NN_SHELL-1
+    do shell=1,TRUE_1NN_SHELL(system%crystal_structure)-1
       do j=1,system%sites(i)%neighbour_shells(shell)%n_neighbour_sites
         nn_site=system%sites(i)%neighbour_shells(shell)%neighbour_sites(j)
         if (system%sites(nn_site)%Z>0) then
@@ -468,8 +666,8 @@ contains
     end do
 
     system%sites(i)%nn=0
-    do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      nn_site=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(j)
+    do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      nn_site=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(j)
       if (system%sites(nn_site)%Z>0) then
         system%sites(i)%nn=system%sites(i)%nn+1
         if (system%sites(nn_site)%substrate) then
@@ -523,7 +721,10 @@ contains
     system%sites(i)%neighbour_shells(dist_index)%neighbour_sites(&
       system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites)=j
     if (.not. system%sites(i)%substrate) then
-      jump_shell=NN_SHELL_TO_JUMP_SHELL(dist_index)
+      jump_shell=NN_SHELL_TO_JUMP_SHELL(dist_index,system%crystal_structure)
+      if (jump_shell>system%max_jump_shell) then
+        jump_shell=0
+      endif
       if (jump_shell>0) then
         if (system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites>system%sites(i)%max_nn) then
           system%sites(i)%max_nn=system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites
@@ -543,7 +744,7 @@ contains
             endif
           endif
         endif
-        if (jump_shell==TRUE_1NN_JUMP_SHELL) then
+        if (jump_shell==TRUE_1NN_JUMP_SHELL(system%crystal_structure)) then
           if (system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites>system%max_1nn) then
             system%max_1nn=system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites
           endif
@@ -572,16 +773,17 @@ contains
             0.0_rk
         endif
         if (system%allow_exchange) then
-          if (jump_shell==TRUE_1NN_JUMP_SHELL) then
+          if (jump_shell==TRUE_1NN_JUMP_SHELL(system%crystal_structure)) then
             if (allocated(system%sites(i)%exchange_states)) then
-              system%sites(i)%exchange_states(1:system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
+              system%sites(i)%exchange_states(1:system%sites(i)%neighbour_shells(&
+                TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites,&
                 system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites)=EVENT_LAE_CHANGED
               system%sites(i)%exchange_barriers(:,:,system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites)=&
                 100.0_rk
               system%sites(i)%exchange_rates(:,system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites)=&
                 0.0_rk
               system%sites(i)%exchange_states(system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites,&
-                1:system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+                1:system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
               system%sites(i)%exchange_barriers(:,system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites,:)=&
                 100.0_rk
               system%sites(i)%exchange_rates(system%sites(i)%neighbour_shells(dist_index)%n_neighbour_sites,:)=&
@@ -597,7 +799,10 @@ contains
     system%sites(j)%neighbour_shells(dist_index)%neighbour_sites(&
       system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites)=i
     if (.not. system%sites(j)%substrate) then
-      jump_shell=NN_SHELL_TO_JUMP_SHELL(dist_index)
+      jump_shell=NN_SHELL_TO_JUMP_SHELL(dist_index,system%crystal_structure)
+      if (jump_shell>system%max_jump_shell) then
+        jump_shell=0
+      endif
       if (jump_shell>0) then
         if (system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites>system%sites(j)%max_nn) then
           system%sites(j)%max_nn=system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites
@@ -617,7 +822,7 @@ contains
             endif
           endif
         endif
-        if (jump_shell==TRUE_1NN_JUMP_SHELL) then
+        if (jump_shell==TRUE_1NN_JUMP_SHELL(system%crystal_structure)) then
           if (system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites>system%max_1nn) then
             system%max_1nn=system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites
           endif
@@ -646,16 +851,17 @@ contains
             0.0_rk
         endif
         if (system%allow_exchange) then
-          if (jump_shell==TRUE_1NN_JUMP_SHELL) then
+          if (jump_shell==TRUE_1NN_JUMP_SHELL(system%crystal_structure)) then
             if (allocated(system%sites(j)%exchange_states)) then
-              system%sites(j)%exchange_states(1:system%sites(j)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
+              system%sites(j)%exchange_states(1:system%sites(j)%neighbour_shells(&
+                TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites,&
                 system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites)=EVENT_LAE_CHANGED
               system%sites(j)%exchange_barriers(:,:,system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites)=&
                 100.0_rk
               system%sites(j)%exchange_rates(:,system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites)=&
                 0.0_rk
               system%sites(j)%exchange_states(system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites,&
-                1:system%sites(j)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+                1:system%sites(j)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
               system%sites(j)%exchange_barriers(:,system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites,:)=&
                 100.0_rk
               system%sites(j)%exchange_rates(system%sites(j)%neighbour_shells(dist_index)%n_neighbour_sites,:)=&
@@ -822,13 +1028,13 @@ contains
     allocate(checked(system%n_sites))
     checked=.false.
     do i=1,system%n_sites
-      if (system%sites(i)%nn>=N_NN_MAX) then
+      if (system%sites(i)%nn>=N_NN_MAX(system%crystal_structure)) then
         cycle
       endif
       triplet(:,1)=system%sites(i)%cartesian_coords(:)
-      do nn1=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites-1
-        nn_site1=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn1)
-        if (system%sites(nn_site1)%nn>=N_NN_MAX) then
+      do nn1=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites-1
+        nn_site1=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn1)
+        if (system%sites(nn_site1)%nn>=N_NN_MAX(system%crystal_structure)) then
           cycle
         endif
         if (system%sites(nn_site1)%Z<=0) then
@@ -839,9 +1045,9 @@ contains
         endif
         diff=system_diff_min_image(system,i,nn_site1)
         triplet(:,2)=system%sites(i)%cartesian_coords(:)+diff
-        do nn2=nn1+1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-          nn_site2=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn2)
-          if (system%sites(nn_site2)%nn>=N_NN_MAX) then
+        do nn2=nn1+1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+          nn_site2=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn2)
+          if (system%sites(nn_site2)%nn>=N_NN_MAX(system%crystal_structure)) then
             cycle
           endif
           if (system%sites(nn_site2)%Z<=0) then
@@ -858,7 +1064,7 @@ contains
           triplet(:,3)=system%sites(i)%cartesian_coords(:)+diff
           centre=geometric_centre(triplet)
           new_site=centre
-          new_site(3)=new_site(3)+system%layer_separation_111
+          new_site(3)=new_site(3)+system%layer_separation
           new_site=wrap_to_cell(system%lattice,new_site,system%periodic)
           call add_site(system,new_site)
           system%sites(system%n_sites)%Z=0
@@ -887,7 +1093,7 @@ contains
 
     integer :: j,k,nn1,nn2,dir,nn_site,found_nn,internal_error
     integer :: n_triplets,nn_dist,found_sites_about_triplet
-    integer :: triplets(2,(N_NN_MAX-1)*(N_NN_MAX-1))
+    integer :: triplets(2,(N_NN_MAX(system%crystal_structure)-1)*(N_NN_MAX(system%crystal_structure)-1))
     real(kind=rk) :: triplet(3,3),diff(3),centre(3),splane(3)
     real(kind=rk) :: new_site(3),mirror_coords(3)
 
@@ -895,17 +1101,17 @@ contains
       error=0
     endif
 
-    if (system%sites(i)%nn>=N_NN_MAX) then
+    if (system%sites(i)%nn>=N_NN_MAX(system%crystal_structure)) then
       return
     endif
     call find_triplets(system,i,triplets,n_triplets)
     do j=1,n_triplets
       nn1=triplets(1,j)
-      if (system%sites(nn1)%nn>=N_NN_MAX) then
+      if (system%sites(nn1)%nn>=N_NN_MAX(system%crystal_structure)) then
         cycle
       endif
       nn2=triplets(2,j)
-      if (system%sites(nn2)%nn>=N_NN_MAX) then
+      if (system%sites(nn2)%nn>=N_NN_MAX(system%crystal_structure)) then
         cycle
       endif
       if (are_1nn_neighbours(system,nn1,nn2)) then
@@ -916,8 +1122,8 @@ contains
         cycle
       endif
       found_sites_about_triplet=0
-      do k=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-        nn_site=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(k)
+      do k=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+        nn_site=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(k)
         if (are_1nn_neighbours(system,nn_site,nn1)) then
           if (are_1nn_neighbours(system,nn_site,nn2)) then
             found_sites_about_triplet=found_sites_about_triplet+1
@@ -993,21 +1199,21 @@ contains
   subroutine find_triplets(system,i,triplets,n_triplets)
     type(t_system),intent(in) :: system
     integer,intent(in) :: i
-    integer,intent(out) :: triplets(2,(N_NN_MAX-1)*(N_NN_MAX-1)),n_triplets
+    integer,intent(out) :: triplets(2,(N_NN_MAX(system%crystal_structure)-1)*(N_NN_MAX(system%crystal_structure)-1)),n_triplets
 
     integer :: nn1,nn2,nn_site1,nn_site2
     
     n_triplets=0
-    do nn1=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites-1
-      nn_site1=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn1)
+    do nn1=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites-1
+      nn_site1=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn1)
       if (system%sites(nn_site1)%substrate) then
         cycle
       endif
       if (system%sites(nn_site1)%Z<=0) then
         cycle
       endif
-      do nn2=nn1+1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-        nn_site2=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn2)
+      do nn2=nn1+1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+        nn_site2=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn2)
         if (system%sites(nn_site2)%substrate) then
           cycle
         endif
@@ -1166,13 +1372,18 @@ contains
 
   end subroutine print_xyz_frame
 
-  function get_cartesian(x,y,z,p)
-    integer,intent(in) :: x,y,z,p
+  function get_cartesian(x,y,z,p,orientation,crystal_structure,hcp_flag)
+    integer,intent(in) :: x,y,z,p,orientation,crystal_structure
+    logical,intent(in) :: hcp_flag
     real(kind=rk),dimension(3) :: get_cartesian
 
-    get_cartesian(1)=x*UNIT_CELL(1)+P_BASE(1,p)
-    get_cartesian(2)=y*UNIT_CELL(2)+P_BASE(2,p)
-    get_cartesian(3)=z*UNIT_CELL(3)+P_BASE(3,p)
+    get_cartesian(1)=x*UNIT_CELL(1,orientation,crystal_structure)+P_BASE(1,p,orientation,crystal_structure)
+    get_cartesian(2)=y*UNIT_CELL(2,orientation,crystal_structure)+P_BASE(2,p,orientation,crystal_structure)
+    if (hcp_flag) then
+      get_cartesian(3)=z*UNIT_CELL(3,orientation,crystal_structure)*2.0_rk/3+P_BASE(3,p,orientation,crystal_structure)
+    else
+      get_cartesian(3)=z*UNIT_CELL(3,orientation,crystal_structure)+P_BASE(3,p,orientation,crystal_structure)
+    endif
 
   end function get_cartesian
 
@@ -1294,13 +1505,13 @@ contains
     endif
 
     system%sites(i)%locked=.false.
-    if (system%sites(i)%nn>=lock_threshold) then
+    if (system%sites(i)%nn>=LOCK_THRESHOLD(system%crystal_structure)) then
       system%sites(i)%locked=.true.
       return
     endif
 
-    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)
+    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)
       if (system%sites(nn_id)%substrate) then
         cycle
       endif
@@ -1314,8 +1525,8 @@ contains
         if (system%sites(i)%nn_substrate>0) then
           if (system%sites(nn_id)%nn_substrate<=0) then
             n_substrate_attached=0
-            do nn_nn_atom=1,system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-              nn_nn_id=system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_nn_atom)
+            do nn_nn_atom=1,system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+              nn_nn_id=system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_nn_atom)
               if (system%sites(nn_nn_id)%Z<=0) then
                 cycle
               endif
@@ -1347,8 +1558,8 @@ contains
       error=0
     endif
 
-    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)
+    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)
       if (system%sites(nn_id)%Z>0) then
         if (.not. system%sites(nn_id)%lock_checked) then
           call check_lockedness(system,nn_id,error=internal_error)
@@ -1362,8 +1573,8 @@ contains
           endif
           system%sites(nn_id)%lock_checked=.true.
         endif
-        do nn_nn_atom=1,system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-          nn_nn_id=system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_nn_atom)
+        do nn_nn_atom=1,system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+          nn_nn_id=system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_nn_atom)
           if (system%sites(nn_nn_id)%Z>0) then
             if (.not. system%sites(nn_nn_id)%lock_checked) then
               call check_lockedness(system,nn_nn_id,error=internal_error)
@@ -1416,20 +1627,20 @@ contains
     endif
 
     ! Check if the neighbour is further than max distance
-    if (d2overl2>JUMP_DIST2_INDEX(my_max_shell)+DIST2_TOL) then
+    if (d2overl2>JUMP_DIST2_INDEX(my_max_shell,system%crystal_structure)+DIST2_TOL) then
       get_dist_index=0
       return
     endif
 
     internal_error=1
     do get_dist_index=2,my_max_shell,2
-      if (d2overl2<=JUMP_DIST2_INDEX(get_dist_index)-DIST2_TOL) then
+      if (d2overl2<=JUMP_DIST2_INDEX(get_dist_index,system%crystal_structure)-DIST2_TOL) then
         ! Hits the previous mid-shell, handled at the end
         internal_error=0
         exit
       endif
-      if (d2overl2>JUMP_DIST2_INDEX(get_dist_index)-DIST2_TOL .and. &
-          d2overl2<=JUMP_DIST2_INDEX(get_dist_index)+DIST2_TOL) then
+      if (d2overl2>JUMP_DIST2_INDEX(get_dist_index,system%crystal_structure)-DIST2_TOL .and. &
+          d2overl2<=JUMP_DIST2_INDEX(get_dist_index,system%crystal_structure)+DIST2_TOL) then
           return
       endif
     end do
@@ -1470,8 +1681,8 @@ contains
     integer :: nn_atom
 
     are_1nn_neighbours_dimer=.false.
-    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      if (j==system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)) then
+    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      if (j==system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)) then
         are_1nn_neighbours_dimer=.true.
         return
       endif
@@ -1486,8 +1697,8 @@ contains
     integer :: nn_atom
 
     are_2nn_neighbours=.false.
-    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_2NN_SHELL)%n_neighbour_sites
-      if (j==system%sites(i)%neighbour_shells(TRUE_2NN_SHELL)%neighbour_sites(nn_atom)) then
+    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_2NN_SHELL(system%crystal_structure))%n_neighbour_sites
+      if (j==system%sites(i)%neighbour_shells(TRUE_2NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)) then
         are_2nn_neighbours=.true.
         return
       endif
@@ -1538,11 +1749,13 @@ contains
     if (system%n_deposited>0) then
       write(fileunit,*) system%deposited_atoms(1:system%n_deposited)
     endif
+    write(fileunit,*) system%orientation
+    write(fileunit,*) system%crystal_structure
     write(fileunit,*) system%lattice_constant
     write(fileunit,*) system%nn_dist2
     write(fileunit,*) system%relax_displacement_tol2
-    write(fileunit,*) system%layer_separation_111
-    write(fileunit,*) system%layer_separation_111_squared
+    write(fileunit,*) system%layer_separation
+    write(fileunit,*) system%layer_separation_squared
     write(fileunit,*) system%max_jump_dist
     write(fileunit,*) system%lae_cutoff_dist
     write(fileunit,*) system%height
@@ -1650,13 +1863,13 @@ contains
       write(fileunit,*) system%sites(i)%hop_rate
       write(fileunit,*) system%sites(i)%exchange_rate
       if (.not. system%sites(i)%substrate .and. system%sites(i)%Z>0) then
-        do j=1,N_JUMP_SHELLS
+        do j=1,system%max_jump_shell
           write(fileunit,*) system%sites(i)%hop_states(:,j)
           write(fileunit,*) system%sites(i)%hop_barriers(:,:,j)
           write(fileunit,*) system%sites(i)%hop_rates(:,j)
         end do
         if (system%allow_exchange) then
-          do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
+          do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
             write(fileunit,*) system%sites(i)%exchange_states(:,j)
             write(fileunit,*) system%sites(i)%exchange_barriers(:,:,j)
             write(fileunit,*) system%sites(i)%exchange_rates(:,j)
@@ -1770,11 +1983,13 @@ contains
     else
       allocate(system%deposited_atoms(BUFFER_SIZE))
     endif
+    read(fileunit,*) system%orientation
+    read(fileunit,*) system%crystal_structure
     read(fileunit,*) system%lattice_constant
     read(fileunit,*) system%nn_dist2
     read(fileunit,*) system%relax_displacement_tol2
-    read(fileunit,*) system%layer_separation_111
-    read(fileunit,*) system%layer_separation_111_squared
+    read(fileunit,*) system%layer_separation
+    read(fileunit,*) system%layer_separation_squared
     read(fileunit,*) system%max_jump_dist
     read(fileunit,*) system%lae_cutoff_dist
     read(fileunit,*) system%height
@@ -1925,19 +2140,25 @@ contains
         allocate(system%sites(i)%hop_states(system%sites(i)%max_nn,system%max_jump_shell))
         allocate(system%sites(i)%hop_barriers(2,system%sites(i)%max_nn,system%max_jump_shell))
         allocate(system%sites(i)%hop_rates(system%sites(i)%max_nn,system%max_jump_shell))
-        do j=1,N_JUMP_SHELLS
+        do j=1,system%max_jump_shell
           read(fileunit,*) system%sites(i)%hop_states(:,j)
           read(fileunit,*) system%sites(i)%hop_barriers(:,:,j)
           read(fileunit,*) system%sites(i)%hop_rates(:,j)
         end do
         if (system%allow_exchange) then
-          allocate(system%sites(i)%exchange_states(system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                                   system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites))
-          allocate(system%sites(i)%exchange_barriers(2,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                                       system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites))
-          allocate(system%sites(i)%exchange_rates(system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                                system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites))
-          do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
+          allocate(system%sites(i)%exchange_states(system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites,&
+                   system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites))
+          allocate(system%sites(i)%exchange_barriers(2,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites,&
+                   system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites))
+          allocate(system%sites(i)%exchange_rates(system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites,&
+                   system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(&
+                   system%crystal_structure))%n_neighbour_sites))
+          do j=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
             read(fileunit,*) system%sites(i)%exchange_states(:,j)
             read(fileunit,*) system%sites(i)%exchange_barriers(:,:,j)
             read(fileunit,*) system%sites(i)%exchange_rates(:,j)
@@ -1996,26 +2217,41 @@ contains
     integer :: nn_atom,nn_id,nnn,nns(3)
 
     has_support=.false.
-    if (system%sites(i)%nn>3) then
+    if (system%sites(i)%nn>N_NN_MIN(system%crystal_structure)) then
       has_support=.true.
       return
     endif
 
-    nnn=0
-    do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-      nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)
-      if (system%sites(nn_id)%Z>0) then
-        nnn=nnn+1
-        nns(nnn)=nn_id
-        if (nnn>=3) then
-          exit
+    if (system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then ! For fcc, we check if three neighbours form a triplet (fcc 111 surface)
+      nnn=0
+      do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+        nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)
+        if (system%sites(nn_id)%Z>0) then
+          nnn=nnn+1
+          nns(nnn)=nn_id
+          if (nnn>=3) then
+            exit
+          endif
         endif
-      endif
-    end do
+      end do
 
-    if (are_1nn_neighbours(system,nns(1),nns(2),nns(3))) then
-      has_support=.true.
+      if (are_1nn_neighbours(system,nns(1),nns(2),nns(3))) then
+        has_support=.true.
+      endif
+    else ! For bcc, we check if there are at least two second-nearest neighbours (bcc 110 surface)
+      nnn=0
+      do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_2NN_SHELL(system%crystal_structure))%n_neighbour_sites
+        nn_id=system%sites(i)%neighbour_shells(TRUE_2NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)
+        if (system%sites(nn_id)%Z>0) then
+          nnn=nnn+1
+          if (nnn>=2) then
+            has_support=.true.
+            return
+          endif
+        endif
+      end do
     endif
+
   end function has_support
 
   subroutine alloc_jumps(system,id,error)
@@ -2034,7 +2270,7 @@ contains
     endif
 
     max_nn=system%sites(id)%max_nn
-    nn=system%sites(id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
+    nn=system%sites(id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
 
     allocate(system%sites(id)%hop_states(max_nn,system%max_jump_shell))
     system%sites(id)%hop_states=EVENT_EMPTY
@@ -2057,9 +2293,9 @@ contains
 
   end subroutine alloc_jumps
 
-  real(kind=rk) function get_Xnn_dist(lattice_constant,x,error)
+  real(kind=rk) function get_Xnn_dist(lattice_constant,crystal_structure,x,error)
     real(kind=rk),intent(in) :: lattice_constant
-    integer,intent(in) :: x
+    integer,intent(in) :: crystal_structure,x
     integer,optional,intent(out) :: error
 
     if (present(error)) then
@@ -2076,9 +2312,10 @@ contains
     endif
 
     if (x<6) then
-      get_Xnn_dist=0.5_rk*lattice_constant*(NEIGH_DIST_FACT(x)+NEIGH_DIST_FACT(x+1))
+      get_Xnn_dist=0.5_rk*lattice_constant*(NEIGH_DIST_FACT(x,crystal_structure)&
+                     +NEIGH_DIST_FACT(x+1,crystal_structure))
     else
-      get_Xnn_dist=1.1_rk*lattice_constant*(NEIGH_DIST_FACT(x))
+      get_Xnn_dist=1.1_rk*lattice_constant*(NEIGH_DIST_FACT(x,crystal_structure))
     endif
   end function get_Xnn_dist
 
@@ -2283,7 +2520,7 @@ contains
                 write(0,"(a,i0,a,i0,a)") "*** Error: couldn't get distance index for pair ",i,", ",id," in check_validity()"
                 if (dist_index>0) then
                   write(0,"(a,f11.6,a,f11.6,a)") "*** Distance: ",sqrt(system_dist2_min_image(system,i,id))," Å vs expected ",&
-                                                   sqrt(JUMP_DIST2_INDEX(dist_index))*system%lattice_constant," Å"
+                                         sqrt(JUMP_DIST2_INDEX(dist_index,system%crystal_structure))*system%lattice_constant," Å"
                 else
                   write(0,"(a,f11.6,a)") "*** Distance: ",sqrt(system_dist2_min_image(system,i,id))," Å; dist_index=0"
                 endif
@@ -2309,7 +2546,7 @@ contains
                                                     " duplicated on shell ",dist_index
                         write(0,"(a,f11.6,a,f11.6,a)") "*** Distance: ",sqrt(system_dist2_min_image(system,i,id)),&
                                                        " Å vs expected ",&
-                                                       sqrt(JUMP_DIST2_INDEX(dist_index))*system%lattice_constant," Å"
+                         sqrt(JUMP_DIST2_INDEX(dist_index,system%crystal_structure))*system%lattice_constant," Å"
                       else
                         found=.true.
                       endif
@@ -2320,7 +2557,7 @@ contains
                   error_count=error_count+1
                   write(0,"(a,i0,a,i0,a,i0)") "*** Error: site ",i," neighbour site ",id," not found on shell ",dist_index
                   write(0,"(a,f11.6,a,f11.6,a)") "*** Distance: ",sqrt(system_dist2_min_image(system,i,id))," Å vs expected ",&
-                                                 sqrt(JUMP_DIST2_INDEX(dist_index))*system%lattice_constant," Å"
+                                       sqrt(JUMP_DIST2_INDEX(dist_index,system%crystal_structure))*system%lattice_constant," Å"
                 endif
               endif
               do shell=1,system%lae_cutoff_shell
@@ -2335,7 +2572,7 @@ contains
                       write(0,"(a,i0,a,i0,a,i0,a,i0)") "*** Error: site ",i," neighbour site ",&
                                                        id," on wrong shell ",shell,"; expected only on ",dist_index
                       write(0,"(a,f11.6,a,f11.6,a)") "*** Distance: ",sqrt(system_dist2_min_image(system,i,id))," Å vs expected ",&
-                                                       sqrt(JUMP_DIST2_INDEX(dist_index))*system%lattice_constant," Å"
+                         sqrt(JUMP_DIST2_INDEX(dist_index,system%crystal_structure))*system%lattice_constant," Å"
                     else
                       write(0,"(a,i0,a,i0,a,i0,a)") "*** Error: site ",i," neighbour site ",&
                                                        id," on shell ",shell,"; not expected"
@@ -2360,7 +2597,7 @@ contains
     do i=system%n_substrate+1,system%n_sites
       nn=0
       n_near=0
-      do shell=1,TRUE_1NN_SHELL-1
+      do shell=1,TRUE_1NN_SHELL(system%crystal_structure)-1
         do nn_atom=1,system%sites(i)%neighbour_shells(shell)%n_neighbour_sites
           nn_id=system%sites(i)%neighbour_shells(shell)%neighbour_sites(nn_atom)
           if (nn_id<=0) then
@@ -2383,16 +2620,17 @@ contains
         write(0,"(a,i0,a,i0,a,i0)") "*** Error: site ",i," n_near count incorrect: found ",&
                                     n_near,", expected ",system%sites(i)%n_near
       endif
-      do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-        nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(nn_atom)
+      do nn_atom=1,system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+        nn_id=system%sites(i)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%neighbour_sites(nn_atom)
         if (nn_id<=0) then
           error_count=error_count+1
           write(0,"(a,i0,a,i0,a,i0,a,i0)") "*** Error: site ",i," neighbour number ",nn_atom,&
-                                           " has nn_id ",nn_id,"<=0 on shell ",TRUE_1NN_SHELL
+                                           " has nn_id ",nn_id,"<=0 on shell ",TRUE_1NN_SHELL(system%crystal_structure)
         elseif (nn_id>system%n_sites) then
           error_count=error_count+1
           write(0,"(a,i0,a,i0,a,i0,a,i0,a,i0)") "*** Error: site ",i," neighbour number ",nn_atom,&
-                                           " has nn_id ",nn_id,">n_sites=",system%n_sites," on shell ",TRUE_1NN_SHELL
+                                           " has nn_id ",nn_id,">n_sites=",system%n_sites," on shell",&
+                                           TRUE_1NN_SHELL(system%crystal_structure)
         else
           if (system%sites(nn_id)%Z>0) then
             nn=nn+1
@@ -2513,7 +2751,7 @@ contains
         error_count=error_count+1
       endif
       do jump_shell=1,system%max_jump_shell
-        shell=JUMP_SHELLS(jump_shell)
+        shell=JUMP_SHELLS(jump_shell,system%crystal_structure)
         do nn_atom=1,system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
           if (system%sites(site_id)%hop_states(nn_atom,jump_shell)==EVENT_VALID) then
             hop_rate=hop_rate+system%sites(site_id)%hop_rates(nn_atom,jump_shell)
@@ -2533,12 +2771,14 @@ contains
       endif
       if (system%allow_exchange) then
         exchange_rate=0.0d0
-        do initial_site=1,system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
-          do final_site=1,system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites
+        do initial_site=1,system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
+          do final_site=1,system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites
             if (system%sites(site_id)%exchange_states(final_site,initial_site)==EVENT_VALID) then
-              initial_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(initial_site)
+              initial_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                           system%crystal_structure))%neighbour_sites(initial_site)
               if (system%sites(initial_id)%locked) then
-                final_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(final_site)
+                final_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                           system%crystal_structure))%neighbour_sites(final_site)
                 write(0,"(a,i0,a,g13.6,a,i0)") "*** Error: site ",initial_id,&
                                                " is marked locked but it has a valid event with exchange rate ",&
                                                system%sites(site_id)%hop_rate,&
@@ -2547,7 +2787,8 @@ contains
               endif
               exchange_rate=exchange_rate+system%sites(site_id)%exchange_rates(final_site,initial_site)
               if (system%sites(site_id)%exchange_rates(final_site,initial_site)<1.0d-100) then
-                final_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL)%neighbour_sites(final_site)
+                final_id=system%sites(site_id)%neighbour_shells(TRUE_1NN_SHELL(&
+                           system%crystal_structure))%neighbour_sites(final_site)
                 write(0,"(a,i0,a,i0,a,i0,a,g13.6,a)") "*** Warning: exchange from site ",initial_id," via ",site_id,&
                                                       " to ",final_id," marked valid but has rate ",&
                                                       system%sites(site_id)%exchange_rates(final_site,initial_site)," Hz"
@@ -2611,12 +2852,12 @@ contains
     ! If deposition site is 3-coordinated, check if there is a more stable site at shortest jump range
     found_site=.false.
     if (system%sites(dep_id)%nn==3) then
-      do shell=1,TRUE_1NN_SHELL
+      do shell=1,TRUE_1NN_SHELL(system%crystal_structure)
         do nn_atom=1,system%sites(dep_id)%neighbour_shells(shell)%n_neighbour_sites
           nn_id=system%sites(dep_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
           if (system%sites(nn_id)%Z==0) then
             if (system%sites(nn_id)%n_near==0) then
-              if (shell<TRUE_1NN_SHELL) then
+              if (shell<TRUE_1NN_SHELL(system%crystal_structure)) then
                 if (system%sites(nn_id)%nn>system%sites(dep_id)%nn) then
                   dep_id=nn_id
                   found_site=.true.
@@ -2644,7 +2885,7 @@ contains
       endif
     endif
 
-    call add_atom_site(system,dep_id,species,atom_type,error=internal_error)
+    call add_atom_site(system,dep_id,species,atom_type,is_deposition=.true.,error=internal_error)
     if (internal_error/=0) then
       write(0,"(a,i0,a)") "*** Error adding atom on site ",dep_id," in add_atom_random()"
       if (present(error)) then
@@ -2655,9 +2896,10 @@ contains
 
   end subroutine add_atom_random
 
-  subroutine add_atom_site(system,dep_id,species,atom_type,error)
+  subroutine add_atom_site(system,dep_id,species,atom_type,is_deposition,error)
     type(t_system),intent(inout) :: system
     integer,intent(in) :: dep_id,species,atom_type
+    logical,intent(in) :: is_deposition
     integer,optional,intent(out) :: error
 
     integer :: internal_error
@@ -2698,23 +2940,27 @@ contains
     endif
 
     do jump_shell=1,system%max_jump_shell
-      shell=JUMP_SHELLS(jump_shell)
+      shell=JUMP_SHELLS(jump_shell,system%crystal_structure)
       system%sites(dep_id)%hop_states(1:system%sites(dep_id)%neighbour_shells(shell)%n_neighbour_sites,&
         jump_shell)=EVENT_LAE_CHANGED
     end do
     if (system%allow_exchange) then
-      system%sites(dep_id)%exchange_states(1:system%sites(dep_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                             1:system%sites(dep_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)&
+      system%sites(dep_id)%exchange_states(1:system%sites(dep_id)%neighbour_shells(TRUE_1NN_SHELL(&
+        system%crystal_structure))%n_neighbour_sites,&
+        1:system%sites(dep_id)%neighbour_shells(TRUE_1NN_SHELL(&
+        system%crystal_structure))%n_neighbour_sites)&
         =EVENT_LAE_CHANGED
     endif
     system%sites(dep_id)%jumps_checked=.false.
 
     ! If this is the first atom, record initial position for mean square displacement tracking
-    if (system%n_deposited==1) then
-      system%first_atom_initial_coords(:)=system%sites(dep_id)%cartesian_coords(:)
-      system%first_atom_unwrapped_coords(:)=system%sites(dep_id)%cartesian_coords(:)
+    if (is_deposition) then
+      if (system%n_deposited==1) then
+        system%first_atom_initial_coords(:)=system%sites(dep_id)%cartesian_coords(:)
+        system%first_atom_unwrapped_coords(:)=system%sites(dep_id)%cartesian_coords(:)
+      endif
     endif
-
+  
     ! If this is the second, the third or the fourth atom, release the first deposited atoms to move again
     if (system%n_deposited<=4) then
       do i=1,system%n_deposited-1
@@ -2726,16 +2972,27 @@ contains
     do shell=1,system%lae_cutoff_shell
       do nn_atom=1,system%sites(dep_id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=system%sites(dep_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
-        if (shell<TRUE_1NN_SHELL) then
+        if (shell<TRUE_1NN_SHELL(system%crystal_structure)) then
           system%sites(nn_id)%n_near=system%sites(nn_id)%n_near+1
-        elseif (shell==TRUE_1NN_SHELL) then
+        elseif (shell==TRUE_1NN_SHELL(system%crystal_structure)) then
           system%sites(nn_id)%nn=system%sites(nn_id)%nn+1
           if (.not. system%sites(nn_id)%substrate) then
             if (system%sites(nn_id)%Z<0) then
-              if (system%sites(nn_id)%nn>3) then
+              if (system%sites(nn_id)%nn>N_NN_MIN(system%crystal_structure)) then
                 system%sites(nn_id)%Z=0
                 system%sites(nn_id)%inactive_counter=0
-              elseif (system%sites(nn_id)%nn==3) then
+              elseif (system%sites(nn_id)%nn==N_NN_MIN(system%crystal_structure)) then
+                if (has_support(system,nn_id)) then
+                  system%sites(nn_id)%Z=0
+                  system%sites(nn_id)%inactive_counter=0
+                endif
+              endif
+            endif
+          endif
+        elseif (shell==TRUE_2NN_SHELL(system%crystal_structure) .and. system%crystal_structure==CRYSTAL_STRUCTURE_BCC) then
+          if (.not. system%sites(nn_id)%substrate) then
+            if (system%sites(nn_id)%Z<0) then
+              if (system%sites(nn_id)%nn==N_NN_MIN(system%crystal_structure)) then
                 if (has_support(system,nn_id)) then
                   system%sites(nn_id)%Z=0
                   system%sites(nn_id)%inactive_counter=0
@@ -2746,22 +3003,27 @@ contains
         endif
         if (system%sites(nn_id)%Z>0 .and. .not. system%sites(nn_id)%substrate) then
           do jump_shell=1,system%max_jump_shell
-            nn_shell=JUMP_SHELLS(jump_shell)
+            nn_shell=JUMP_SHELLS(jump_shell,system%crystal_structure)
             system%sites(nn_id)%hop_states(1:system%sites(nn_id)%neighbour_shells(nn_shell)%n_neighbour_sites,&
               jump_shell)=EVENT_LAE_CHANGED
           end do
           if (system%allow_exchange) then
             system%sites(nn_id)%exchange_states(&
-              1:system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-              1:system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)=EVENT_LAE_CHANGED
+              1:system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              system%crystal_structure))%n_neighbour_sites,&
+              1:system%sites(nn_id)%neighbour_shells(TRUE_1NN_SHELL(&
+              system%crystal_structure))%n_neighbour_sites)=EVENT_LAE_CHANGED
           endif
           system%sites(nn_id)%jumps_checked=.false.
-          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+          jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,system%crystal_structure)
+          if (jump_shell>system%max_jump_shell) then
+            jump_shell=0
+          endif
           if (jump_shell>0) then
             reverse_nn_ind=system%sites(dep_id)%neighbour_shells(shell)%reverse_indices(nn_atom)
             system%sites(nn_id)%hop_states(reverse_nn_ind,jump_shell)=EVENT_FORBIDDEN
             if (system%allow_exchange) then
-              if (shell==TRUE_1NN_SHELL) then
+              if (shell==TRUE_1NN_SHELL(system%crystal_structure)) then
                 system%sites(nn_id)%exchange_states(reverse_nn_ind,:)=EVENT_FORBIDDEN
               endif
             endif
@@ -2771,10 +3033,10 @@ contains
                 nn_nn_id=system%sites(nn_id)%neighbour_shells(nn_shell)%neighbour_sites(nn_nn_atom)
                 system%sites(nn_nn_id)%jumps_checked=.false.
                 if (system%allow_exchange) then
-                  if (nn_shell==TRUE_1NN_SHELL) then
+                  if (nn_shell==TRUE_1NN_SHELL(system%crystal_structure)) then
                     reverse_nn_ind=system%sites(nn_id)%neighbour_shells(nn_shell)%reverse_indices(nn_nn_atom)
                     system%sites(nn_nn_id)%exchange_states(reverse_nn_ind,&
-                      1:system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites&
+                      1:system%sites(nn_nn_id)%neighbour_shells(TRUE_1NN_SHELL(system%crystal_structure))%n_neighbour_sites&
                       )=EVENT_LAE_CHANGED
                   endif
                 endif
@@ -2785,15 +3047,17 @@ contains
       end do
     end do
 
-    ! Find new adsorption sites around the deposited
-    call find_new_sites(system,dep_id,error=internal_error)
-    if (internal_error/=0) then
-      write(0,"(a,i0,a)") "*** Error finding new sites around site ",&
-                          dep_id," in add_atom_site()"
-      if (present(error)) then
-        error=internal_error
+    if (system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+      ! Find new adsorption sites around the deposited
+      call find_new_sites(system,dep_id,error=internal_error)
+      if (internal_error/=0) then
+        write(0,"(a,i0,a)") "*** Error finding new sites around site ",&
+                            dep_id," in add_atom_site()"
+        if (present(error)) then
+          error=internal_error
+        endif
+        return
       endif
-      return
     endif
 
     system%sites(1:system%n_sites)%lock_checked=.false.
@@ -2826,14 +3090,16 @@ contains
     integer :: jump_shell,shell
 
     do jump_shell=1,system%max_jump_shell
-      shell=JUMP_SHELLS(jump_shell)
+      shell=JUMP_SHELLS(jump_shell,system%crystal_structure)
       system%sites(id)%hop_states(1:system%sites(id)%neighbour_shells(shell)%n_neighbour_sites,&
         jump_shell)=EVENT_LAE_CHANGED
     end do
     if (system%allow_exchange) then
-      system%sites(id)%exchange_states(1:system%sites(id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites,&
-                                       1:system%sites(id)%neighbour_shells(TRUE_1NN_SHELL)%n_neighbour_sites)&
-        =EVENT_LAE_CHANGED
+      system%sites(id)%exchange_states(1:system%sites(id)%neighbour_shells(TRUE_1NN_SHELL(&
+                                       system%crystal_structure))%n_neighbour_sites,&
+                                       1:system%sites(id)%neighbour_shells(TRUE_1NN_SHELL(&
+                                       system%crystal_structure))%n_neighbour_sites)&
+                                       =EVENT_LAE_CHANGED
     endif
     system%sites(id)%jumps_checked=.false.
   end subroutine release_atom
@@ -2935,20 +3201,7 @@ contains
               cycle
             endif
             if (my_force_fcc) then
-              ! Look for atoms between true fcc 2nn and 3nn shells, disregard site if any are found
-              not_fcc=.false.
-              do shell=TRUE_2NN_SHELL+1,TRUE_3NN_SHELL-1
-                do nn_atom=1,system%sites(site_id)%neighbour_shells(shell)%n_neighbour_sites
-                  nn_id=system%sites(site_id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
-                  if (system%sites(nn_id)%Z>0) then
-                    not_fcc=.true.
-                    exit
-                  endif
-                end do
-                if (not_fcc) then
-                  exit
-                endif
-              end do
+              not_fcc=.not. site_is_fcc(system,site_id)
               if (not_fcc) then
                 cycle
               endif
@@ -2971,7 +3224,7 @@ contains
       return
     endif
 
-    call add_atom_site(system,dep_id,species,atom_type,error=internal_error)
+    call add_atom_site(system,dep_id,species,atom_type,is_deposition=.false.,error=internal_error)
     if (internal_error/=0) then
       write(0,"(a,i0,a)") "*** Error adding atom on site ",dep_id," in add_atom_xyz()"
       if (present(error)) then
@@ -2981,6 +3234,48 @@ contains
     endif
 
   end subroutine add_atom_xyz
+
+  subroutine add_monolayer(system,species,atom_type,error)
+    type(t_system),intent(inout) :: system
+    integer,intent(in) :: species,atom_type
+    integer,optional,intent(out) :: error
+
+    integer :: internal_error
+    integer :: id
+    logical,allocatable :: marked_to_be_filled(:)
+
+    if (present(error)) then
+      error=0
+    endif
+  
+    allocate(marked_to_be_filled(system%n_sites))
+    marked_to_be_filled=.false.
+    do id=system%n_substrate+1,system%n_sites
+      if (system%sites(id)%Z==0 .and. system%sites(id)%n_near==0) then
+        if (system%orientation==ORIENTATION_111 .and. system%crystal_structure==CRYSTAL_STRUCTURE_CLOSE_PACKED) then
+          if (site_is_fcc(system,id)) then
+            marked_to_be_filled(id)=.true.
+          endif
+        else
+          marked_to_be_filled(id)=.true.
+        endif
+      endif
+    end do
+    do id=system%n_substrate+1,system%n_sites
+      if (marked_to_be_filled(id)) then
+        call add_atom_site(system,id,species,atom_type,is_deposition=.false.,error=internal_error)
+        if (internal_error/=0) then
+          write(0,"(a,i0,a)") "*** Error adding atom in site ",id," in add_monolayer()"
+          if (present(error)) then
+            error=internal_error
+            return
+          endif
+        endif
+      endif
+    end do
+    deallocate(marked_to_be_filled)
+
+  end subroutine add_monolayer
 
   subroutine add_hexagon(system,max_layers,species,atom_type,error)
     type(t_system),intent(inout) :: system
@@ -3180,7 +3475,10 @@ contains
     endif
 
     do shell=1,NN_SHELLS
-      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell)
+      jump_shell=NN_SHELL_TO_JUMP_SHELL(shell,system%crystal_structure)
+      if (jump_shell>system%max_jump_shell) then
+        jump_shell=0
+      endif
       do nn_atom=1,system%sites(id)%neighbour_shells(shell)%n_neighbour_sites
         nn_id=system%sites(id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
         n_neighbour_sites=system%sites(nn_id)%neighbour_shells(shell)%n_neighbour_sites
@@ -3201,7 +3499,7 @@ contains
               system%sites(nn_id)%hop_rates(n_neighbour_sites,jump_shell)
 
             system%sites(nn_id)%hop_states(n_neighbour_sites,jump_shell)=EVENT_EMPTY
-            if (jump_shell==TRUE_1NN_JUMP_SHELL) then
+            if (jump_shell==TRUE_1NN_JUMP_SHELL(system%crystal_structure)) then
               if (system%allow_exchange) then
                 system%sites(nn_id)%exchange_states(reverse_index,:)=&
                   system%sites(nn_id)%exchange_states(n_neighbour_sites,:)
@@ -3333,5 +3631,25 @@ contains
     end do
 
   end function delete_inactive_sites
+
+  logical function site_is_fcc(system,id)
+    type(t_system),intent(in) :: system
+    integer,intent(in) :: id
+
+    integer :: shell,nn_atom,nn_id
+
+    site_is_fcc=.true.
+    ! Look for atoms between true fcc 2nn and 3nn shells; site is not fcc if any are found
+    do shell=TRUE_2NN_SHELL(system%crystal_structure)+1,TRUE_3NN_SHELL(system%crystal_structure)-1
+      do nn_atom=1,system%sites(id)%neighbour_shells(shell)%n_neighbour_sites
+        nn_id=system%sites(id)%neighbour_shells(shell)%neighbour_sites(nn_atom)
+        if (system%sites(nn_id)%Z>0) then
+          site_is_fcc=.false.
+          return
+        endif
+      end do
+    end do
+
+  end function site_is_fcc
 
 end module mlkmc_atoms_module

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-FLAGS=-cpp -fopenmp -O2 -g -fbounds-check
+FLAGS=-cpp -fopenmp -O2
 LIB=-lFoX_sax -lFoX_wxml -lgap -lquip -llammps
 LIB_INCLUDE=-LQUIP/src/fox/wxml -LQUIP/src/fox/sax -Llammps/src
 INCLUDE=-IQUIP/src/fox/wxml -IQUIP/src/fox/sax -Ilammps/src
