@@ -9,6 +9,8 @@
 # No default values are defined.
 pot_name          "CuAgAu.eam.fs" # Potential file name
 pot_style         "eam/fs"        # Potential style
+crystal           fcc             # Crystal structure: fcc, bcc or (limited to the 0001 substrate orientation) hcp
+orientation       111             # Substrate orientation: 100, 110 or 111 for fcc and bcc, 0001 for hcp
 lattice_constant  4.0896          # Lattice constant in Å
 nZ                1               # Number of elements in the system
 Z                 47              # List of atomic numbers, e.g. 47 29
