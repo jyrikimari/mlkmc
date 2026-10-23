@@ -58,7 +58,7 @@ neb_images        11              # Number of NEB images. Crucially should match
 neb_steps         1000            # Maximum number of NEB steps. Default 1000
 neb_spring        1.0             # NEB spring constant. Default 1.0
 neb_error         0.1             # Intrinsic error of NEB barriers in eV. Default value 0.1
-ml_tol            0.5             # Error estimate tolerance for accepting machine learning barriers in eV. Default 0.5
+ml_tol            0.05            # Error estimate tolerance for accepting machine learning barriers in eV. Default 0.05
 dep_rate          0.0             # Deposition rate in monolayers/second for all elements in the system. Default 0.0 for all
 debug             F               # Debug flag for additional information and checks. Default F(alse)
 track_MSD         F               # Flag for tracking the mean square displacement of the first-deposited atom. Default F(alse)

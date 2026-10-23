@@ -480,7 +480,7 @@ contains
     neb_spring=1.0
     neb_error=0.1d0
     relax_tol=1.0d-7
-    ml_tol=1.0d-2
+    ml_tol=0.05d0
     xyz_out="out.xyz"
     restart_file="kmc.restart"
     seed=12345
